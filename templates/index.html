@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stimulus Testing - Organizational Profile Evaluation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+</head>
+<body class="bg-light" data-has-active-participant-session="{{ 'true' if has_active_participant_session else 'false' }}">
+
+<div class="container-fluid py-4">
+
+<!-- Informed Consent -->
+<div class="modal fade" id="consentModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Informed Consent and Study Overview</h5>
+            </div>
+            <div class="modal-body">
+                <p><strong>Purpose:</strong> This study examines how people evaluate employees whose leadership potential is under consideration in an organizational setting.</p>
+                <p><strong>Your role:</strong> Please act as a workplace rater or evaluator. For each profile, imagine that you are assessing a real employee and consider whether the available information suggests they could effectively guide and support other people. Make your judgments as carefully as you would in that situation.</p>
+                <h6 class="fw-bold mt-4">What you will do</h6>
+                <ul class="small">
+                    <li>You will evaluate four candidate profiles. For each profile, assess the person's leadership potential, complete the rating scales, and set the bonus-allocation slider based on the information initially shown.</li>
+                    <li>Every rating item must be answered, and you must move the bonus slider before submitting. You may move it back to $0 if that is your decision.</li>
+                    <li>Once you submit the first evaluation for a candidate, you cannot return to or change it.</li>
+                    <li>You will then see additional performance information. Before completing the second and final evaluation, you must write a brief justification for your initial judgments.</li>
+                    <li>In the final evaluation, you may keep your original ratings or revise them after considering the new information and your justification.</li>
+                    <li>Please answer independently, use only the information available in the study, and take the instruction-check items seriously.</li>
+                </ul>
+                <p class="small text-muted mb-4">There are no correct ratings. We are interested in your own considered judgments and the reasoning you provide.</p>
+                <p class="small mb-3">Participation is voluntary and you may stop at any time. Your responses will be used for research purposes.</p>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="consentCheckbox">
+                    <label class="form-check-label" for="consentCheckbox">I have read the study information, understand the task, and consent to participate.</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="btnStartStudy" disabled>Start Study</button>
+            </div>
+        </div>
+    </div>
+</div>
+    <div class="row mb-4 border-bottom pb-3">
+        <div class="col-md-6">
+            <h4 class="fw-bold text-dark">Research Platform</h4>
+            <p class="text-muted small mb-0">Candidate Evaluation Study</p>
+        </div>
+        <div class="col-md-6 text-end">
+            <div id="progressContainer" class="d-none">
+                <span class="badge bg-primary px-3 py-2 fs-6" id="progressText"></span>
+                <div class="progress mt-2" style="height: 8px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <div id="candidateProfileCard" class="card candidate-profile-card shadow-sm border-0 sticky-top" style="top: 24px; z-index: 10;">
+                <div class="card-header bg-dark text-white fw-bold py-2 text-uppercase tracking-wider" style="font-size: 0.85rem;">
+                    I. Candidate Profile
+                </div>
+                <div class="card-body profile-card-body bg-white d-flex flex-column justify-content-between">
+                    
+                    <div class="profile-photo-wrap text-center">
+                        <img id="stimulusPhoto" src="" alt="Candidate Portrait" class="img-thumbnail shadow-sm">
+                    </div>
+
+                    <div class="profile-admin-info mb-3 p-3 bg-light rounded border">
+                        <h6 class="border-bottom pb-2 fw-bold text-secondary text-uppercase small">Administrative Information</h6>
+                        <table class="table table-sm table-borderless mb-0">
+                            <tr>
+                                <td class="text-muted w-40 small">Name:</td>
+                                <td id="stimulusName" class="fw-bold text-dark">---</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted small">Department:</td>
+                                <td id="stimulusDomain" class="fw-bold text-primary">---</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted small">Job Title:</td>
+                                <td id="stimulusRole" class="italic">---</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted small">Age:</td>
+                                <td id="stimulusAge" class="fw-normal">---</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted small">Work Experience:</td>
+                                <td class="fw-normal text-dark">5 years</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <!-- Prior Performance Section -->
+                    <div id="performanceSection" class="mb-3 p-3 rounded performance-section" style="display: none;">
+                        <h6 id="performanceDomainText" class="border-bottom pb-2 fw-bold text-secondary text-uppercase small">Prior Performance</h6>
+                        <div class="d-flex justify-content-between align-items-baseline gap-2">
+                            <span class="fw-bolder fs-4 text-primary" id="performanceTextValue">-- / 100</span>
+                            <span id="performanceLabel" class="performance-label">---</span>
+                        </div>
+                        <p class="performance-ranking small fw-semibold mb-2" id="performanceRankingText">---</p>
+                        <div class="progress mt-2" style="height: 12px;">
+                            <div id="performanceBarValue" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <p class="performance-evidence small text-dark mt-2 mb-0" id="performanceEvidenceText">---</p>
+                    </div>
+
+                    <div class="p-2 text-center text-muted border-top rounded bg-light" style="font-size: 0.75rem;">
+                        Please review the visual and contextual information presented in the profile above before completing the scales on the right.
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card shadow-sm border-0" style="height: 100%; display: flex; flex-direction: column;">
+                <div class="card-header bg-primary text-white fw-bold py-3 text-uppercase tracking-wider">
+                    II. Evaluation Questionnaire
+                </div>
+                <div class="card-body bg-white p-4 flex-grow-1" style="overflow-y: auto;">
+
+                    <div class="eval-block mb-4 p-3 border rounded bg-white">
+                        <h6 class="fw-bold border-bottom pb-2 text-dark">
+                            A. Leadership <span class="text-muted small fw-normal"></span> 
+                        </h6>
+                        <p class="small text-muted mb-3">To what extent do you agree or disagree with the following statements about this person? (1 = Strongly Disagree, 7 = Strongly Agree):</p>
+                        <div id="blockA_container">
+                            </div>
+                    </div>
+
+                    <div class="eval-block mb-4 p-3 border rounded bg-white">
+                        <h6 class="fw-bold border-bottom pb-2 text-dark">
+                            B. Promotability <span class="text-muted small fw-normal"></span> 
+                        </h6>
+                        <div id="blockB_container">
+                            </div>
+                    </div>
+
+                    <!-- Bonus Allocation Block -->
+                    <div class="eval-block mb-4 p-3 border rounded bg-white">
+                        <h6 class="fw-bold border-bottom pb-2 text-dark">C. Bonus Allocation</h6>
+                        <p class="small text-muted mb-3">From a budget of $3,000, how much of a performance bonus would you award this candidate?</p>
+                        <div class="d-flex align-items-center">
+                            <input type="range" class="form-range" id="bonus_slider" min="0" max="3000" step="50" value="0">
+                            <span id="bonus_value" class="fw-bold ms-3" style="min-width: 60px;">$0</span>
+                        </div>
+                        <p id="bonusInteractionHint" class="bonus-interaction-hint mb-0" aria-live="polite">Move the slider before submitting. You may return it to $0.</p>
+                    </div>
+
+                        <!-- Justification Section (initially hidden) -->
+                    <div id="justificationSection" style="display: none;" class="mt-4 p-3 border rounded bg-light shadow-inner">
+                        <h6 id="justificationTitle" class="fw-bold text-dark">Justification for Your Evaluation</h6>
+                        <p id="justificationInstruction" class="small text-muted">Please explain the reasoning behind your ratings in a few words.</p>
+                        <textarea id="justification_text" class="form-control" rows="4" placeholder="Explain the evidence that informed your ratings..."></textarea>
+                        <div id="aiChatLaunch" class="text-end">
+                            <button id="btnOpenChat" class="btn btn-outline-primary btn-sm mt-2">Discuss with AI Assistant</button>
+                        </div>
+                        <div id="finalEvaluationInstruction" class="condition-review-instruction d-none" role="status"></div>
+                    </div>
+
+                    <button class="btn btn-primary w-100 fw-bold py-3 mt-3 shadow" id="btnNext" disabled>
+                        SAVE AND CONTINUE
+                    </button>
+                    <div id="postEvaluationActions" class="d-grid gap-2 mt-3 d-none">
+                        <button type="button" class="btn btn-outline-secondary fw-bold py-3" id="btnReviewEvaluation">
+                            RETURN TO EVALUATION
+                        </button>
+                        <button type="button" class="btn btn-primary fw-bold py-3 shadow" id="btnSubmitFinalEvaluation">
+                            SUBMIT EVALUATION AND CONTINUE
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<aside id="aiChatPanel" class="ai-chat-panel d-none" aria-label="AI-assisted reflection">
+    <div class="ai-chat-header">
+        <div>
+            <h2 class="h6 mb-0">AI Reflection Assistant</h2>
+            <p class="mb-0 small">Ask questions or explore your reasoning.</p>
+    </div>
+    <div class="ai-chat-controls">
+        <button type="button" id="btnMinimizeChat" class="chat-header-button" aria-label="Minimize AI chat" title="Minimize AI chat">-</button>
+        <button type="button" id="btnCloseChat" class="btn-close btn-close-white" aria-label="Close AI chat"></button>
+    </div>
+  </div>
+    <div class="ai-chat-body">
+        <div id="chatMessages"></div>
+        <div class="chat-input-group">
+            <input type="text" id="chatInput" class="form-control" placeholder="Write your response here...">
+            <button id="btnSendChat" class="btn btn-primary">Send</button>
+        </div>
+    </div>
+</aside>
+<button type="button" id="btnRestoreChat" class="ai-chat-restore d-none" aria-label="Restore AI chat" title="Restore AI chat">AI</button>
+
+<!-- Performance Review Transition Modal -->
+<div class="modal fade" id="performanceTransitionModal" tabindex="-1" aria-labelledby="performanceTransitionModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content stage-transition-modal">
+            <div class="modal-body p-3">
+                <span class="stage-transition-eyebrow">Next stage</span>
+                <h2 class="h4 fw-bold mt-2 mb-3" id="performanceTransitionModalLabel">Review performance and evaluate again</h2>
+                <p id="performanceTransitionIntro" class="text-secondary mb-4">The candidate's prior performance information is now available in the profile panel. Please use it while completing the second evaluation.</p>
+                <ol id="performanceTransitionSteps" class="stage-transition-steps mb-4"></ol>
+                <button type="button" class="btn btn-primary w-100 py-2 fw-semibold" data-bs-dismiss="modal">VIEW PERFORMANCE INFORMATION</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Final Performance Recall Modal -->
+<div class="modal fade" id="finalRecallModal" tabindex="-1" aria-labelledby="finalRecallModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+                <h5 class="modal-title" id="finalRecallModalLabel">Final Performance Recall</h5>
+      </div>
+      <div class="modal-body">
+                <p class="text-muted">Based on your recollection, enter the performance score shown for each candidate and classify their overall performance.</p>
+                <div id="finalRecallContainer"></div>
+      </div>
+      <div class="modal-footer">
+                <button type="button" id="btnSubmitFinalRecall" class="btn btn-primary">Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Final Study Questionnaire Modal -->
+<div class="modal fade" id="finalQuestionnaireModal" tabindex="-1" aria-labelledby="finalQuestionnaireModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="finalQuestionnaireModalLabel">Final Study Questionnaire</h5>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="rating_change_reason">If any of your evaluations changed after viewing the performance information, what influenced that change? If none changed, please state this.</label>
+                    <textarea class="form-control" id="rating_change_reason" rows="3" placeholder="Describe what influenced your evaluations, or state that your evaluations did not change."></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="demand_awareness">What do you believe was the real purpose of this research study?</label>
+                    <textarea class="form-control" id="demand_awareness" rows="3" placeholder="Enter your guesses or hypotheses about what we are investigating..."></textarea>
+                </div>
+                <fieldset id="aiUsefulnessSection" class="pt-3 border-top">
+                    <legend class="small fw-semibold text-dark mb-2">Please indicate how much you agree or disagree with each statement about the AI assistant.</legend>
+                    <div id="aiUsefulnessContainer"></div>
+                </fieldset>
+                <fieldset id="demographicsSection" class="pt-3 mt-4 border-top">
+                    <legend class="small fw-semibold text-dark mb-3">About you</legend>
+                    <p class="small text-muted">Please select “Prefer not to say” for any question you do not wish to answer.</p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_age_range">Age range</label>
+                            <select class="form-select" id="demographic_age_range">
+                                <option value="">Select an option</option>
+                                <option value="18-24">18-24</option>
+                                <option value="25-34">25-34</option>
+                                <option value="35-44">35-44</option>
+                                <option value="45-54">45-54</option>
+                                <option value="55-64">55-64</option>
+                                <option value="65_or_older">65 or older</option>
+                                <option value="prefer_not_to_say">Prefer not to say</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_gender">Gender</label>
+                            <select class="form-select" id="demographic_gender">
+                                <option value="">Select an option</option>
+                                <option value="woman">Woman</option>
+                                <option value="man">Man</option>
+                                <option value="non_binary">Non-binary</option>
+                                <option value="self_describe">Prefer to self-describe</option>
+                                <option value="prefer_not_to_say">Prefer not to say</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_work_status">Employment status</label>
+                            <select class="form-select" id="demographic_work_status">
+                                <option value="">Select an option</option>
+                                <option value="employed_full_time">Employed full-time</option>
+                                <option value="employed_part_time">Employed part-time</option>
+                                <option value="self_employed">Self-employed</option>
+                                <option value="student">Student</option>
+                                <option value="unemployed">Not currently employed</option>
+                                <option value="retired">Retired</option>
+                                <option value="other">Other</option>
+                                <option value="prefer_not_to_say">Prefer not to say</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_work_field">Current or most recent work field</label>
+                            <select class="form-select" id="demographic_work_field">
+                                <option value="">Select an option</option>
+                                <option value="technology">Technology</option>
+                                <option value="sales_marketing">Sales or marketing</option>
+                                <option value="human_resources">Human resources</option>
+                                <option value="finance">Finance or accounting</option>
+                                <option value="healthcare">Healthcare</option>
+                                <option value="education">Education</option>
+                                <option value="public_sector">Public sector</option>
+                                <option value="engineering_manufacturing">Engineering or manufacturing</option>
+                                <option value="customer_service">Customer service</option>
+                                <option value="other">Other</option>
+                                <option value="prefer_not_to_say">Prefer not to say</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_work_experience">Years of work experience</label>
+                            <select class="form-select" id="demographic_work_experience">
+                                <option value="">Select an option</option>
+                                <option value="less_than_1_year">Less than 1 year</option>
+                                <option value="1_to_3_years">1-3 years</option>
+                                <option value="4_to_7_years">4-7 years</option>
+                                <option value="8_to_15_years">8-15 years</option>
+                                <option value="more_than_15_years">More than 15 years</option>
+                                <option value="prefer_not_to_say">Prefer not to say</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_nationality">Nationality</label>
+                            <input class="form-control" id="demographic_nationality" maxlength="128" placeholder="For example, Romanian or Prefer not to say">
+                        </div>
+                    </div>
+                </fieldset>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btnSubmitFinalQuestionnaire" class="btn btn-primary">Complete Study</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/experiment.js') }}"></script>
+</body>
+</html>

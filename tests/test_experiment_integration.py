@@ -1,0 +1,382 @@
+import csv
+import io
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from app import create_app
+from extensions import db
+from models import InitialEvaluation, Participant, Trial
+from utils import get_completion_url
+
+
+PROFILE_ORDER = ['it_2', 'it_3', 'sales_2', 'sales_5']
+PROFILE_SCORES = {'it_2': 97, 'it_3': 26, 'sales_2': 93, 'sales_5': 31}
+PROFILE_CATEGORIES = {
+    'it_2': 'high_performance',
+    'it_3': 'low_performance',
+    'sales_2': 'high_performance',
+    'sales_5': 'low_performance',
+}
+FINAL_DEMOGRAPHICS = {
+    'demographic_age_range': '25-34',
+    'demographic_gender': 'prefer_not_to_say',
+    'demographic_work_status': 'employed_full_time',
+    'demographic_work_field': 'technology',
+    'demographic_work_experience': '4_to_7_years',
+    'demographic_nationality': 'Romanian',
+}
+
+
+class ExperimentIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({'SECRET_KEY': 'test-secret-key'})
+        self.client = self.app.test_client()
+        with self.app.app_context():
+            db.drop_all()
+            db.create_all()
+
+    def tearDown(self):
+        with self.app.app_context():
+            db.session.remove()
+            db.drop_all()
+            db.engine.dispose()
+
+    def start_prolific_session(self, profile_order=PROFILE_ORDER):
+        self.client.get('/?PROLIFIC_PID=participant-1&STUDY_ID=study-1&SESSION_ID=session-1')
+        response = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': profile_order,
+        })
+        self.assertEqual(response.status_code, 201, response.get_json())
+        data = response.get_json()
+        with self.app.app_context():
+            participant = db.session.get(Participant, data['participant_id'])
+            participant.experimental_condition = 'control'
+            db.session.commit()
+        return data
+
+    @staticmethod
+    def valid_initial_payload(participant_id, profile_id, trial_order):
+        payload = {
+            'participant_id': participant_id,
+            'profile_id': profile_id,
+            'submission_id': f"initial-{trial_order}-{profile_id.replace('_', '-')}",
+            'reaction_time_ms': 1200,
+            'bonus_allocation': 500,
+            'attention_check': 2,
+        }
+        for field in ('lead_1', 'lead_2', 'lead_3', 'lead_4', 'prom_1', 'prom_2', 'prom_3'):
+            payload[field] = 4
+        return payload
+
+    @staticmethod
+    def valid_final_payload(participant_id, profile_id, trial_order):
+        payload = {
+            'participant_id': participant_id,
+            'profile_id': profile_id,
+            'submission_id': f"final-{trial_order}-{profile_id.replace('_', '-')}",
+            'post_reaction_time_ms': 800,
+            'justification_text': 'The available evidence supports this considered evaluation of the candidate.',
+            'bonus_allocation_post': 1000,
+            'attention_check_post': 6,
+        }
+        for field in ('lead_1', 'lead_2', 'lead_3', 'lead_4', 'prom_1', 'prom_2', 'prom_3'):
+            payload[f'{field}_post'] = 5
+        return payload
+
+    def save_all_trials(self, participant_id, client=None):
+        client = client or self.client
+        for trial_order, profile_id in enumerate(PROFILE_ORDER, start=1):
+            initial_response = client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+                participant_id, profile_id, trial_order
+            ))
+            self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+            final_response = client.post('/api/save_trial', json=self.valid_final_payload(
+                participant_id, profile_id, trial_order
+            ))
+            self.assertEqual(final_response.status_code, 201, final_response.get_json())
+
+    def test_session_rejects_an_order_with_missing_or_duplicate_profiles(self):
+        self.client.get('/?PROLIFIC_PID=participant-1&STUDY_ID=study-1&SESSION_ID=session-1')
+        response = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': ['it_2', 'it_2', 'sales_2', 'sales_5'],
+        })
+
+        self.assertEqual(response.status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(Participant.query.count(), 0)
+
+    def test_trial_data_uses_canonical_domain_and_order_and_rejects_invalid_bonus(self):
+        session_data = self.start_prolific_session()
+        payload = self.valid_initial_payload(session_data['participant_id'], 'it_2', 1)
+        payload['bonus_allocation'] = 525
+        invalid_response = self.client.post('/api/save_initial_evaluation', json=payload)
+        self.assertEqual(invalid_response.status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(InitialEvaluation.query.count(), 0)
+
+        payload['bonus_allocation'] = 500
+        saved_response = self.client.post('/api/save_initial_evaluation', json=payload)
+        self.assertEqual(saved_response.status_code, 201, saved_response.get_json())
+        with self.app.app_context():
+            initial_evaluation = InitialEvaluation.query.one()
+            self.assertEqual(initial_evaluation.domain, 'IT')
+            self.assertEqual(initial_evaluation.trial_order, 1)
+
+    def test_api_rejects_non_object_json_without_creating_a_participant(self):
+        response = self.client.post('/api/init_session', json=['invalid'])
+        self.assertEqual(response.status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(Participant.query.count(), 0)
+
+    def test_duplicate_submission_does_not_create_a_second_trial(self):
+        session_data = self.start_prolific_session()
+        initial_payload = self.valid_initial_payload(session_data['participant_id'], 'it_2', 1)
+        initial_response = self.client.post('/api/save_initial_evaluation', json=initial_payload)
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+        payload = self.valid_final_payload(session_data['participant_id'], 'it_2', 1)
+
+        first_response = self.client.post('/api/save_trial', json=payload)
+        duplicate_response = self.client.post('/api/save_trial', json=payload)
+
+        self.assertEqual(first_response.status_code, 201, first_response.get_json())
+        self.assertEqual(duplicate_response.status_code, 200, duplicate_response.get_json())
+        with self.app.app_context():
+            self.assertEqual(Trial.query.count(), 1)
+
+    def test_initial_evaluation_is_persisted_and_resumed_before_final_evaluation(self):
+        session_data = self.start_prolific_session()
+        initial_payload = self.valid_initial_payload(session_data['participant_id'], 'it_2', 1)
+        initial_response = self.client.post('/api/save_initial_evaluation', json=initial_payload)
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+
+        resumed_response = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': list(reversed(PROFILE_ORDER)),
+        })
+        self.assertEqual(resumed_response.status_code, 201, resumed_response.get_json())
+        resumed_data = resumed_response.get_json()
+        self.assertEqual(resumed_data['study_stage'], 'post_evaluation')
+        self.assertEqual(resumed_data['initial_evaluation']['lead_1'], 4)
+
+        final_payload = self.valid_final_payload(session_data['participant_id'], 'it_2', 1)
+        final_payload['lead_1_pre'] = 1
+        final_response = self.client.post('/api/save_trial', json=final_payload)
+        self.assertEqual(final_response.status_code, 201, final_response.get_json())
+        with self.app.app_context():
+            self.assertEqual(Trial.query.one().lead_1_pre, 4)
+
+    def test_refresh_resumes_the_active_direct_participant_session(self):
+        self.client.get('/')
+        session_data = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': PROFILE_ORDER,
+        }).get_json()
+        initial_response = self.client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+            session_data['participant_id'], 'it_2', 1
+        ))
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+
+        self.assertEqual(self.client.get('/').status_code, 200)
+        resumed_response = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': list(reversed(PROFILE_ORDER)),
+        })
+
+        self.assertEqual(resumed_response.status_code, 201, resumed_response.get_json())
+        self.assertEqual(resumed_response.get_json()['participant_id'], session_data['participant_id'])
+        self.assertEqual(resumed_response.get_json()['study_stage'], 'post_evaluation')
+
+    def test_session_replaces_an_incomplete_active_participant(self):
+        with self.app.app_context():
+            incomplete_participant = Participant(status='started')
+            db.session.add(incomplete_participant)
+            db.session.commit()
+            incomplete_participant_id = incomplete_participant.id
+
+        with self.client.session_transaction() as session:
+            session['participant_id'] = incomplete_participant_id
+
+        response = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': PROFILE_ORDER,
+        })
+
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertNotEqual(response.get_json()['participant_id'], incomplete_participant_id)
+        self.assertEqual(response.get_json()['profile_order'], PROFILE_ORDER)
+
+    def test_participant_api_rejects_a_foreign_participant_identifier(self):
+        session_data = self.start_prolific_session()
+        other_client = self.app.test_client()
+        response = other_client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+            session_data['participant_id'], 'it_2', 1
+        ))
+        self.assertEqual(response.status_code, 401)
+        with self.app.app_context():
+            self.assertEqual(InitialEvaluation.query.count(), 0)
+
+    def test_final_recall_rejects_non_object_scores(self):
+        session_data = self.start_prolific_session()
+        self.save_all_trials(session_data['participant_id'])
+        response = self.client.post('/api/save_final_recall', json={
+            'participant_id': session_data['participant_id'],
+            'recalled_performance_scores': [91, 26, 89, 31],
+            'recalled_performance_categories': PROFILE_CATEGORIES,
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_admin_export_requires_login_and_neutralizes_csv_formulas(self):
+        session_data = self.start_prolific_session()
+        self.save_all_trials(session_data['participant_id'])
+        with self.app.app_context():
+            participant = db.session.get(Participant, session_data['participant_id'])
+            participant.demand_awareness = '=HYPERLINK("https://example.test")'
+            participant.rating_change_reason = '+formula'
+            db.session.commit()
+
+        self.assertEqual(self.client.get('/export_csv').status_code, 401)
+        with patch.dict('os.environ', {'ADMIN_API_KEY': 'test-admin-key'}, clear=False):
+            login_response = self.client.post('/api/admin/login', json={'admin_key': 'test-admin-key'})
+            self.assertEqual(login_response.status_code, 200, login_response.get_json())
+            export_response = self.client.get('/export_csv')
+        self.assertEqual(export_response.status_code, 200)
+        rows = list(csv.DictReader(io.StringIO(export_response.get_data(as_text=True).lstrip('\ufeff'))))
+        self.assertEqual(rows[0]['demand_awareness'], "'=HYPERLINK(\"https://example.test\")")
+        self.assertEqual(rows[0]['rating_change_reason'], "'+formula")
+
+    def test_ai_condition_requires_a_substantive_reflection_message(self):
+        session_data = self.start_prolific_session()
+        with self.app.app_context():
+            participant = db.session.get(Participant, session_data['participant_id'])
+            participant.experimental_condition = 'ai_assisted'
+            db.session.commit()
+
+        initial_payload = self.valid_initial_payload(session_data['participant_id'], 'it_2', 1)
+        initial_response = self.client.post('/api/save_initial_evaluation', json=initial_payload)
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+        payload = self.valid_final_payload(session_data['participant_id'], 'it_2', 1)
+        missing_reflection = self.client.post('/api/save_trial', json=payload)
+        self.assertEqual(missing_reflection.status_code, 400)
+
+        payload['ai_conversation'] = '[{"role":"user","content":"justification"},{"role":"assistant","content":"reflection"},{"role":"user","content":"I reconsidered the evidence and retained my evaluations."}]'
+        saved_response = self.client.post('/api/save_trial', json=payload)
+        self.assertEqual(saved_response.status_code, 201, saved_response.get_json())
+
+    def test_placeholder_completion_configuration_does_not_redirect_participants(self):
+        participant = SimpleNamespace(recruitment_source='prolific')
+        with patch.dict('os.environ', {
+            'PROLIFIC_COMPLETION_URL': '',
+            'PROLIFIC_COMPLETION_CODE': 'your-prolific-completion-code',
+        }, clear=False):
+            self.assertIsNone(get_completion_url(participant))
+
+    def test_prolific_sessions_are_isolated_and_complete_with_the_configured_code(self):
+        second_client = self.app.test_client()
+        self.client.get('/?PROLIFIC_PID=participant-a&STUDY_ID=study-1&SESSION_ID=session-a')
+        second_client.get('/?PROLIFIC_PID=participant-b&STUDY_ID=study-1&SESSION_ID=session-b')
+        first_session = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': PROFILE_ORDER,
+        }).get_json()
+        second_session = second_client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': list(reversed(PROFILE_ORDER)),
+        }).get_json()
+
+        self.assertNotEqual(first_session['participant_id'], second_session['participant_id'])
+        with self.app.app_context():
+            participant = db.session.get(Participant, first_session['participant_id'])
+            participant.experimental_condition = 'control'
+            db.session.commit()
+        foreign_save = second_client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+            first_session['participant_id'], 'it_2', 1
+        ))
+        self.assertEqual(foreign_save.status_code, 401, foreign_save.get_json())
+
+        second_initial_payload = self.valid_initial_payload(second_session['participant_id'], 'sales_5', 1)
+        second_initial_payload['bonus_allocation'] = 1500
+        second_initial_save = second_client.post('/api/save_initial_evaluation', json=second_initial_payload)
+        self.assertEqual(second_initial_save.status_code, 201, second_initial_save.get_json())
+
+        self.save_all_trials(first_session['participant_id'])
+        recall_response = self.client.post('/api/save_final_recall', json={
+            'participant_id': first_session['participant_id'],
+            'recalled_performance_scores': PROFILE_SCORES,
+            'recalled_performance_categories': PROFILE_CATEGORIES,
+        })
+        self.assertEqual(recall_response.status_code, 200, recall_response.get_json())
+        with patch.dict('os.environ', {'PROLIFIC_COMPLETION_CODE': 'test-completion-code'}, clear=False):
+            finish_response = self.client.post('/api/finish_session', json={
+                'participant_id': first_session['participant_id'],
+                'demand_awareness': 'The study examines workplace candidate evaluations.',
+                'rating_change_reason': 'Performance information influenced some ratings.',
+                **FINAL_DEMOGRAPHICS,
+            })
+
+        self.assertEqual(finish_response.status_code, 200, finish_response.get_json())
+        self.assertEqual(
+            finish_response.get_json()['completion_url'],
+            'https://app.prolific.com/submissions/complete?cc=test-completion-code',
+        )
+        with self.app.app_context():
+            self.assertEqual(Trial.query.filter_by(participant_id=first_session['participant_id']).count(), 4)
+            self.assertEqual(Trial.query.filter_by(participant_id=second_session['participant_id']).count(), 0)
+            self.assertEqual(
+                InitialEvaluation.query.filter_by(participant_id=second_session['participant_id']).one().bonus_allocation,
+                1500,
+            )
+
+    def test_complete_flow_resumes_recall_then_questionnaire_and_exports_stable_csv(self):
+        session_data = self.start_prolific_session()
+        self.save_all_trials(session_data['participant_id'])
+
+        resume_recall = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': list(reversed(PROFILE_ORDER)),
+        })
+        self.assertEqual(resume_recall.status_code, 201, resume_recall.get_json())
+        self.assertEqual(resume_recall.get_json()['study_stage'], 'final_recall')
+        self.assertEqual(resume_recall.get_json()['profile_order'], PROFILE_ORDER)
+
+        recall_response = self.client.post('/api/save_final_recall', json={
+            'participant_id': session_data['participant_id'],
+            'recalled_performance_scores': PROFILE_SCORES,
+            'recalled_performance_categories': PROFILE_CATEGORIES,
+        })
+        self.assertEqual(recall_response.status_code, 200, recall_response.get_json())
+
+        resume_questionnaire = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': PROFILE_ORDER,
+        })
+        self.assertEqual(resume_questionnaire.status_code, 201, resume_questionnaire.get_json())
+        self.assertEqual(resume_questionnaire.get_json()['study_stage'], 'final_questionnaire')
+
+        finish_response = self.client.post('/api/finish_session', json={
+            'participant_id': session_data['participant_id'],
+            'demand_awareness': 'The study examines workplace candidate evaluations.',
+            'rating_change_reason': 'Performance information influenced some ratings.',
+            **FINAL_DEMOGRAPHICS,
+        })
+        self.assertEqual(finish_response.status_code, 200, finish_response.get_json())
+
+        with self.client.session_transaction() as session:
+            session['is_admin'] = True
+        export_response = self.client.get('/export_csv')
+        self.assertEqual(export_response.status_code, 200)
+        rows = list(csv.DictReader(io.StringIO(export_response.get_data(as_text=True).lstrip('\ufeff'))))
+        self.assertEqual(len(rows), 4)
+        self.assertEqual([row['trial_order'] for row in rows], ['1', '2', '3', '4'])
+        self.assertEqual([row['profile_id'] for row in rows], PROFILE_ORDER)
+        self.assertEqual(len({row['profile_id'] for row in rows}), 4)
+        self.assertTrue(all(row['recalled_performance_score'] for row in rows))
+        self.assertTrue(all(row['recalled_performance_category'] for row in rows))
+        self.assertEqual(rows[0]['demographic_age_range'], FINAL_DEMOGRAPHICS['demographic_age_range'])
+        self.assertEqual(rows[0]['demographic_nationality'], FINAL_DEMOGRAPHICS['demographic_nationality'])
+
+
+if __name__ == '__main__':
+    unittest.main()

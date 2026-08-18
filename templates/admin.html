@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Research Data Monitoring</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { 
+            background-color: #f4f6f9; 
+            font-family: 'Inter', -apple-system, sans-serif; 
+            color: #333;
+        }
+        .table-responsive { 
+            max-height: 75vh; 
+            overflow-y: auto; 
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.02);
+        }
+        thead th { 
+            position: sticky; 
+            top: 0; 
+            background-color: #2c3e50 !important; 
+            color: white !important; 
+            z-index: 2; 
+            font-size: 0.78rem; 
+            text-transform: uppercase; 
+            letter-spacing: 0.5px;
+            vertical-align: middle;
+            border-bottom: 2px solid #1a252f !important;
+        }
+        tbody td {
+            font-size: 0.85rem;
+            vertical-align: middle;
+        }
+        .bg-header-block {
+            background-color: #eaeded !important;
+            color: #2c3e50;
+            font-weight: 700;
+            text-align: center;
+            font-size: 0.75rem;
+            letter-spacing: 0.5px;
+        }
+        .font-monospace {
+            font-size: 0.78rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid py-5 px-4">
+    <div class="row mb-4 align-items-center">
+        <div class="col-md-8">
+            <h2 class="fw-bold text-dark mb-1">Data Monitoring (Phase I)</h2>
+            <p class="text-muted mb-0">Research Baseline: Granular item evaluation for Cronbach's Alpha analysis and stimulus sampling.</p>
+        </div>
+        <div class="col-md-4 text-end">
+            <a href="/export_csv" class="btn btn-success fw-bold px-4 py-2 shadow-sm border-0">
+                DOWNLOAD FINAL DATA (CSV)
+            </a>
+            <a href="/export_initial_evaluations_csv" class="btn btn-outline-success fw-bold px-3 py-2 ms-2">
+                INITIAL EVALUATIONS
+            </a>
+            <form action="/api/admin/logout" method="post" class="d-inline">
+                <button class="btn btn-outline-secondary px-3 py-2 ms-2" type="submit">Log out</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 overflow-hidden">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0 align-middle table-bordered">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" scope="col" style="width: 60px;">ID</th>
+                            <th rowspan="2" scope="col" style="width: 120px;">Participant ID</th>
+                            <th rowspan="2" scope="col" style="width: 60px; text-align: center;">Order</th>
+                            <th rowspan="2" scope="col" style="width: 140px;">Stimulus</th>
+                            <th colspan="8" class="bg-header-block">Evaluation (Pre-Performance)</th>
+                            <th colspan="8" class="bg-header-block">Evaluation (Post-Performance)</th>
+                            <th colspan="2" class="bg-header-block">Memory Check</th>
+                            <th colspan="2" class="bg-header-block">Justification</th>
+                            <th rowspan="2" scope="col" style="width: 100px; text-align: center;">Reaction Time (ms)</th>
+                        </tr>
+                        <tr>
+                            <!-- Leadership -->
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L1</th>
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L2</th>
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L3</th>
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L4</th>
+                            <th scope="col" style="text-align: center; background-color: #2980b9; color: white;">P1</th>
+                            <th scope="col" style="text-align: center; background-color: #2980b9; color: white;">P2</th>
+                            <th scope="col" style="text-align: center; background-color: #2980b9; color: white;">P3</th>
+                            <th scope="col" style="text-align: center; background-color: #16a085; color: white;">Bonus ($)</th>
+                            
+                            <!-- Post-Performance -->
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L1</th>
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L2</th>
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L3</th>
+                            <th scope="col" style="text-align: center; background-color: #34495e; color: white;">L4</th>
+                            <th scope="col" style="text-align: center; background-color: #2980b9; color: white;">P1</th>
+                            <th scope="col" style="text-align: center; background-color: #2980b9; color: white;">P2</th>
+                            <th scope="col" style="text-align: center; background-color: #2980b9; color: white;">P3</th>
+                            <th scope="col" style="text-align: center; background-color: #16a085; color: white;">Bonus ($)</th>
+
+                            <!-- Memory Check -->
+                            <th scope="col" style="text-align: center; background-color: #f39c12; color: white;">Recalled Score</th>
+                            <th scope="col" style="text-align: center; background-color: #f39c12; color: white;">Recall Error</th>
+
+                            <!-- Justification -->
+                            <th scope="col" style="background-color: #8e44ad; color: white;">Text</th>
+                            <th scope="col" style="background-color: #8e44ad; color: white;">AI Chat</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for trial in trials %}
+                        <tr>
+                            <td class="fw-bold text-muted text-center">{{ trial.id }}</td>
+                            <td>
+                                <span class="badge bg-secondary font-monospace" style="font-size: 0.72rem;">
+                                    {{ trial.participant_id[:8] }}...
+                                </span>
+                            </td>
+                            <td class="text-center font-monospace fw-semibold">{{ trial.trial_order }}</td>
+                            <td>
+                                <span class="badge {% if trial.domain == 'IT' %}bg-primary{% else %}bg-info text-dark{% endif %}">
+                                    {{ trial.domain }}
+                                </span>
+                                <span class="small font-monospace ms-1 fw-bold text-dark">[{{ trial.profile_id }}]</span>
+                            </td>
+                            
+                            <!-- Pre-Performance Data -->
+                            <td class="text-center fw-bold text-dark">{{ trial.lead_1_pre }}</td>
+                            <td class="text-center fw-bold text-dark">{{ trial.lead_2_pre }}</td>
+                            <td class="text-center fw-bold text-dark">{{ trial.lead_3_pre }}</td>
+                            <td class="text-center fw-bold text-dark">{{ trial.lead_4_pre }}</td>
+                            <td class="text-center fw-bold text-primary">{{ trial.prom_1_pre }}</td>
+                            <td class="text-center fw-bold text-primary">{{ trial.prom_2_pre }}</td>
+                            <td class="text-center fw-bold text-primary">{{ trial.prom_3_pre }}</td>
+                            <td class="text-center text-success fw-bold">${{ trial.bonus_allocation_pre }}</td>
+                            
+                            <!-- Post-Performance Data -->
+                            <td class="text-center fw-bold text-dark bg-light">{{ trial.lead_1_post }}</td>
+                            <td class="text-center fw-bold text-dark bg-light">{{ trial.lead_2_post }}</td>
+                            <td class="text-center fw-bold text-dark bg-light">{{ trial.lead_3_post }}</td>
+                            <td class="text-center fw-bold text-dark bg-light">{{ trial.lead_4_post }}</td>
+                            <td class="text-center fw-bold text-primary bg-light">{{ trial.prom_1_post }}</td>
+                            <td class="text-center fw-bold text-primary bg-light">{{ trial.prom_2_post }}</td>
+                            <td class="text-center fw-bold text-primary bg-light">{{ trial.prom_3_post }}</td>
+                            <td class="text-center text-success fw-bold bg-light">${{ trial.bonus_allocation_post }}</td>
+                            
+                            <td class="text-center fw-bold text-dark bg-light">{{ trial.recalled_performance_score if trial.recalled_performance_score is not none else 'n/a' }}</td>
+                            <td class="text-center fw-bold text-dark bg-light">{{ trial.performance_recall_error if trial.performance_recall_error is not none else 'n/a' }}</td>
+                            <td>
+                                <div class="text-truncate text-muted small" style="max-width: 260px;" title="{{ trial.justification_text }}">
+                                    {{ trial.justification_text if trial.justification_text else 'n/a' }}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="text-truncate text-muted small" style="max-width: 260px;" title="{{ trial.ai_conversation }}">
+                                    {{ trial.ai_conversation if trial.ai_conversation else 'n/a' }}
+                                </div>
+                            </td>
+                            
+                            <td class="text-center font-monospace text-muted">{{ trial.reaction_time_ms }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="24" class="text-center py-5 text-muted bg-white">
+                                <div class="py-4">
+                                    <h5 class="fw-bold mb-1">No trials recorded yet.</h5>
+                                    <p class="small mb-0 text-muted">Data will appear automatically in this dashboard as participants complete their evaluations.</p>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer bg-white text-muted small py-3 border-top">
+            <strong>Methodological Note:</strong> This dashboard displays the latest 100 entries in raw format for rapid visual monitoring. For complete psychometric analysis of internal consistency (Cronbach's Alpha) and construct validity (CFA) in R or SPSS, download the extended dataset using the CSV export button.
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

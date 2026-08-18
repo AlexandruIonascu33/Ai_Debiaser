@@ -1,0 +1,8 @@
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.1.0
+pg8000==1.31.1
+python-dotenv==1.0.0
+gunicorn==21.2.0
+openai==1.35.3
+httpx<0.28
