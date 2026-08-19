@@ -62,6 +62,8 @@ def create_app(test_config=None):
     app.config.setdefault('REQUIRE_PROLIFIC_METADATA', app.config['APP_ENV'] == 'production')
     app.config.setdefault('MAX_CONTENT_LENGTH', 64 * 1024)
     app.config.setdefault('RATELIMIT_STORAGE_URI', os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'))
+    if app.config['APP_ENV'] == 'production' and app.config['RATELIMIT_STORAGE_URI'] == 'memory://':
+        app.logger.warning('RATELIMIT_STORAGE_URI is not configured; AI IP rate limits are local to each app instance.')
 
     db.init_app(app)
     migrate.init_app(app, db)

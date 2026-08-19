@@ -139,7 +139,7 @@ def is_configured_value(value):
 
 def get_missing_production_settings():
     missing_settings = [
-        setting_name for setting_name in ('ADMIN_SECRET_KEY', 'ADMIN_API_KEY', 'OPENAI_API_KEY', 'RATELIMIT_STORAGE_URI')
+        setting_name for setting_name in ('ADMIN_SECRET_KEY', 'ADMIN_API_KEY', 'OPENAI_API_KEY')
         if not is_configured_value(os.environ.get(setting_name))
     ]
     has_completion_redirect = any(

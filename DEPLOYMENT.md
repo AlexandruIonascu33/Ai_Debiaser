@@ -13,13 +13,12 @@ ADMIN_API_KEY=<different long random secret>
 OPENAI_API_KEY=<OpenAI API key>
 OPENAI_MODEL=gpt-4.1-mini
 AI_CHAT_RATE_LIMIT=30 per hour
-RATELIMIT_STORAGE_URI=<Railway Redis connection URL>
 PROLIFIC_COMPLETION_CODE=<Prolific completion code>
 ```
 
 Set `PROLIFIC_COMPLETION_URL` instead of `PROLIFIC_COMPLETION_CODE` only when Prolific provides a complete redirect URL. Do not use any `your-...` or `change-this-...` values in production.
 
-Create a Railway Redis service and set `RATELIMIT_STORAGE_URI` to its private `REDIS_URL` reference. Do not use `memory://` in production: it resets on deployment and is not shared across instances.
+For stronger shared rate limiting across multiple Railway instances, create a Railway Redis service and set `RATELIMIT_STORAGE_URI` to its private `REDIS_URL` reference. Without it, the application still deploys and limits each instance independently with in-memory storage. The hard cap of five AI responses per profile remains enforced in PostgreSQL in either configuration.
 
 ## Release procedure
 
