@@ -108,9 +108,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     profile_order: randomizedProfiles.map(profile => profile.id)
                 })
             });
-            if (!response.ok) throw new Error('Error initializing the database.');
-            
             const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'The study session could not be initialized.');
             STATE.participantId = data.participant_id;
             STATE.experimentalCondition = data.experimental_condition;
             STATE.stimuliList = data.profile_order.map(profileId =>
@@ -143,7 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
         } catch (error) {
             console.error("Critical System Error:", error);
-            alert("The system could not initialize the session. Please refresh the page.");
+            alert(error.message || 'The system could not initialize the session. Please refresh the page.');
             return false;
         }
     }
