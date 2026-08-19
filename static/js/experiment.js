@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         'Overall, I found the AI assistant useful for this task.'
     ];
     const MIN_JUSTIFICATION_LENGTH = 50;
-    const MIN_AI_RESPONSE_LENGTH = 30;
+    const MAX_AI_JUSTIFICATION_LENGTH = 3000;
     const MAX_AI_MESSAGE_LENGTH = 500;
     const AI_ASSISTED_CONDITION = 'ai_assisted';
     const FIXED_ATTENTION_CHECKS = [
@@ -449,10 +449,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         STATE.phaseStartTime = performance.now();
         renderEvaluationItems('post');
         document.getElementById('btnNext').classList.add('d-none');
-        document.getElementById('postEvaluationActions').classList.add('d-none');
+        document.getElementById('postEvaluationActions').classList.remove('d-none');
         const submitButton = document.getElementById('btnSubmitFinalEvaluation');
-        submitButton.disabled = false;
+        submitButton.disabled = isAiAssistedCondition();
         submitButton.innerText = 'SUBMIT EVALUATION AND CONTINUE';
+        updatePostEvaluationActions();
         showPerformanceTransitionModal();
     }
 
@@ -460,13 +461,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (STATE.evaluationPhase !== 'post') return;
 
         const justificationText = document.getElementById('justification_text').value.trim();
-        const isReadyForReview = justificationText.length >= MIN_JUSTIFICATION_LENGTH
-            && (!isAiAssistedCondition() || STATE.hasSentReflectionMessage);
-        document.getElementById('postEvaluationActions').classList.toggle('d-none', !isReadyForReview);
+        const submitButton = document.getElementById('btnSubmitFinalEvaluation');
+        const finalInstruction = document.getElementById('finalEvaluationInstruction');
+        document.getElementById('postEvaluationActions').classList.remove('d-none');
 
-        if (!isAiAssistedCondition()) {
-            document.getElementById('finalEvaluationInstruction').classList.toggle('d-none', justificationText.length < MIN_JUSTIFICATION_LENGTH);
+        if (isAiAssistedCondition()) {
+            submitButton.disabled = !STATE.hasSentReflectionMessage;
+            finalInstruction.innerHTML = STATE.hasSentReflectionMessage
+                ? '<strong>Thank you for reflecting.</strong> Taking the discussion into account, please now <strong>confirm or, if appropriate, revise your final evaluations</strong> for this candidate.'
+                : `To continue, write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters and send at least one message to the AI assistant.`;
+            finalInstruction.classList.remove('d-none');
+        } else {
+            submitButton.disabled = justificationText.length < MIN_JUSTIFICATION_LENGTH;
+            finalInstruction.classList.toggle('d-none', justificationText.length < MIN_JUSTIFICATION_LENGTH);
         }
+
     }
 
     function returnToEvaluation() {
@@ -518,7 +527,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
             const justificationText = document.getElementById('justification_text').value.trim();
             if (justificationText.length < MIN_JUSTIFICATION_LENGTH) {
-                alert('Please explain your reasoning in a few words before continuing.');
+                alert(`Please write at least ${MIN_JUSTIFICATION_LENGTH} characters explaining which evidence informed your ratings before continuing.`);
                 return;
             }
             if (isAiAssistedCondition() && !STATE.hasSentReflectionMessage) {
@@ -543,7 +552,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const justification = document.getElementById('justification_text').value.trim();
         if (justification.length < MIN_JUSTIFICATION_LENGTH) {
-            alert('Please explain your reasoning in a few words before starting the reflection.');
+            alert(`Before opening the AI assistant, write at least ${MIN_JUSTIFICATION_LENGTH} characters explaining which evidence informed your ratings.`);
             updatePostEvaluationActions();
             return;
         }
@@ -596,8 +605,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function sendChatMessage() {
         const input = document.getElementById('chatInput');
         const message = input.value.trim();
-        if (message.length < MIN_AI_RESPONSE_LENGTH) {
-            alert('Please respond to the AI assistant in a few words.');
+        if (!message) {
+            alert('Please write a message for the AI assistant. You may send a short response, but it cannot be blank.');
             input.focus();
             return;
         }
@@ -644,7 +653,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const profile = STATE.stimuliList[STATE.currentTrial];
         return {
             profile_id: profile.id,
-            candidate_profile: {
+            candidate_record: {
                 name: profile.name,
                 role: profile.role,
                 domain: profile.domain,
@@ -653,15 +662,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 performance_score: profile.performance_score,
                 performance_evidence: profile.performance_evidence
             },
-            leadership_items: QUESTIONS.A_LEADERSHIP.map((question, index) => ({
-                question,
-                response: STATE.preEvaluationData[`lead_${index + 1}`]
-            })),
-            promotability_items: QUESTIONS.B_PROMOTABILITY.map((question, index) => ({
-                question,
-                response: STATE.preEvaluationData[`prom_${index + 1}`]
-            })),
-            bonus_allocation: STATE.preEvaluationData.bonus_allocation,
+            participant_current_evaluation: {
+                leadership_items: QUESTIONS.A_LEADERSHIP.map((question, index) => ({
+                    question,
+                    selected_rating: getRadioValue(`lead_${index + 1}`)
+                })),
+                promotability_items: QUESTIONS.B_PROMOTABILITY.map((question, index) => ({
+                    question,
+                    selected_rating: getRadioValue(`prom_${index + 1}`)
+                })),
+                bonus_allocation: {
+                    selected: STATE.hasAdjustedBonusSlider,
+                    value: STATE.hasAdjustedBonusSlider ? parseInt(document.getElementById('bonus_slider').value) : null
+                },
+                instruction_check_response: getRadioValue('attention_check')
+            },
             participant_justification: document.getElementById('justification_text').value.trim()
         };
     }
@@ -823,6 +838,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function submitFinalQuestionnaire() {
         const demandText = document.getElementById('demand_awareness').value.trim();
         const ratingChangeReason = document.getElementById('rating_change_reason').value.trim();
+        const technicalDifficulties = document.getElementById('technical_difficulties').value.trim();
         const aiUsefulness = {};
         AI_USEFULNESS_ITEMS.forEach((_, index) => {
             aiUsefulness[`ai_usefulness_${index + 1}`] = getRadioValue(`ai_usefulness_${index + 1}`);
@@ -857,6 +873,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             alert("Please complete the final question about the study's purpose before submitting.");
             return;
         }
+        if (!technicalDifficulties) {
+            alert('Please describe any technical difficulties you encountered, or write None if there were no difficulties.');
+            document.getElementById('technical_difficulties').focus();
+            return;
+        }
         if (isAiAssistedCondition() && Object.values(aiUsefulness).some(response => response === null)) {
             alert('Please answer all questions about the AI assistant before submitting.');
             return;
@@ -872,6 +893,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     participant_id: STATE.participantId,
                     demand_awareness: demandText,
                     rating_change_reason: ratingChangeReason,
+                    technical_difficulties: technicalDifficulties,
                     ...aiUsefulness,
                     ...demographics
                 })

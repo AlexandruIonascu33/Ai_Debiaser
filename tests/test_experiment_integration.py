@@ -25,6 +25,7 @@ FINAL_DEMOGRAPHICS = {
     'demographic_work_field': 'technology',
     'demographic_work_experience': '4_to_7_years',
     'demographic_nationality': 'Romanian',
+    'technical_difficulties': 'None',
 }
 
 
@@ -107,6 +108,29 @@ class ExperimentIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         with self.app.app_context():
             self.assertEqual(Participant.query.count(), 0)
+
+    def test_new_participants_receive_and_persist_a_random_condition(self):
+        assigned_conditions = {}
+        for index, expected_condition in enumerate(('ai_assisted', 'control'), start=1):
+            client = self.app.test_client()
+            prolific_pid = f'participant-{index}'
+            client.get(f'/?PROLIFIC_PID={prolific_pid}&STUDY_ID=study-1&SESSION_ID=session-{index}')
+            with patch('routes.secrets.choice', return_value=expected_condition) as choose_condition:
+                response = client.post('/api/init_session', json={
+                    'consent_accepted': True,
+                    'profile_order': PROFILE_ORDER,
+                })
+            self.assertEqual(response.status_code, 201, response.get_json())
+            self.assertEqual(response.get_json()['experimental_condition'], expected_condition)
+            choose_condition.assert_called_once_with(('ai_assisted', 'control'))
+            assigned_conditions[prolific_pid] = expected_condition
+
+        with self.app.app_context():
+            saved_conditions = {
+                participant.prolific_pid: participant.experimental_condition
+                for participant in Participant.query.all()
+            }
+        self.assertEqual(saved_conditions, assigned_conditions)
 
     def test_trial_data_uses_canonical_domain_and_order_and_rejects_invalid_bonus(self):
         session_data = self.start_prolific_session()
@@ -324,20 +348,14 @@ class ExperimentIntegrationTests(unittest.TestCase):
         ):
             first_response = self.client.post('/api/ai_chat', json={
                 **base_payload,
-                'justification': 'The available evidence supports this considered evaluation of the candidate.',
+                'justification': 'Brief justification.',
             })
             self.assertEqual(first_response.status_code, 200, first_response.get_json())
             self.assertEqual(len(first_response.get_json()['conversation']), 2)
 
-            short_message_response = self.client.post('/api/ai_chat', json={**base_payload, 'message': 'Too short'})
-            self.assertEqual(short_message_response.status_code, 400)
-
-            second_response = self.client.post('/api/ai_chat', json={
-                **base_payload,
-                'message': 'I reconsidered the evidence and retained my evaluations for the reasons described.',
-            })
-            self.assertEqual(second_response.status_code, 200, second_response.get_json())
-            self.assertEqual(len(second_response.get_json()['conversation']), 4)
+            short_message_response = self.client.post('/api/ai_chat', json={**base_payload, 'message': 'OK'})
+            self.assertEqual(short_message_response.status_code, 200, short_message_response.get_json())
+            self.assertEqual(len(short_message_response.get_json()['conversation']), 4)
 
             for message in (
                 'I want to consider whether the performance record should affect each of my ratings.',
@@ -465,6 +483,7 @@ class ExperimentIntegrationTests(unittest.TestCase):
         self.assertTrue(all(row['recalled_performance_category'] for row in rows))
         self.assertEqual(rows[0]['demographic_age_range'], FINAL_DEMOGRAPHICS['demographic_age_range'])
         self.assertEqual(rows[0]['demographic_nationality'], FINAL_DEMOGRAPHICS['demographic_nationality'])
+        self.assertEqual(rows[0]['technical_difficulties'], FINAL_DEMOGRAPHICS['technical_difficulties'])
 
 
 if __name__ == '__main__':

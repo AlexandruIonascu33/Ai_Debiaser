@@ -28,6 +28,7 @@ class Participant(db.Model):
     completed_at = db.Column(db.DateTime, nullable=True)
     demand_awareness = db.Column(db.Text, nullable=True)
     rating_change_reason = db.Column(db.Text, nullable=True)
+    technical_difficulties = db.Column(db.Text, nullable=True)
     ai_usefulness_1 = db.Column(db.Integer, nullable=True)
     ai_usefulness_2 = db.Column(db.Integer, nullable=True)
     ai_usefulness_3 = db.Column(db.Integer, nullable=True)

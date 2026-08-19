@@ -143,6 +143,7 @@ def ensure_schema_columns():
         'experimental_condition': "VARCHAR(20) NOT NULL DEFAULT 'ai_assisted'",
         'resume_count': 'INTEGER NOT NULL DEFAULT 0',
         'rating_change_reason': 'TEXT',
+        'technical_difficulties': 'TEXT',
         'ai_usefulness_1': 'INTEGER',
         'ai_usefulness_2': 'INTEGER',
         'ai_usefulness_3': 'INTEGER',

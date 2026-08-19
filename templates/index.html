@@ -158,7 +158,7 @@
                     <div id="justificationSection" style="display: none;" class="mt-4 p-3 border rounded bg-light shadow-inner">
                         <h6 id="justificationTitle" class="fw-bold text-dark">Justification for Your Evaluation</h6>
                         <p id="justificationInstruction" class="small text-muted">Please explain the reasoning behind your ratings in a few words.</p>
-                        <textarea id="justification_text" class="form-control" rows="4" maxlength="1000" placeholder="Explain the evidence that informed your ratings..."></textarea>
+                        <textarea id="justification_text" class="form-control" rows="4" maxlength="3000" placeholder="Explain the evidence that informed your ratings..."></textarea>
                         <div id="aiChatLaunch" class="text-end">
                             <button id="btnOpenChat" class="btn btn-outline-primary btn-sm mt-2">Discuss with AI Assistant</button>
                         </div>
@@ -197,7 +197,7 @@
     <div class="ai-chat-body">
         <div id="chatMessages"></div>
         <div class="chat-input-group">
-            <input type="text" id="chatInput" class="form-control" minlength="30" maxlength="500" placeholder="Write your response here...">
+            <input type="text" id="chatInput" class="form-control" maxlength="500" placeholder="Write your response here...">
             <button id="btnSendChat" class="btn btn-primary">Send</button>
         </div>
     </div>
@@ -252,6 +252,10 @@
                 <div class="mb-3">
                     <label class="form-label fw-semibold" for="demand_awareness">What do you believe was the real purpose of this research study?</label>
                     <textarea class="form-control" id="demand_awareness" rows="3" placeholder="Enter your guesses or hypotheses about what we are investigating..."></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="technical_difficulties">Did you encounter any technical difficulties during the study? Please describe them, or write “None”.</label>
+                    <textarea class="form-control" id="technical_difficulties" rows="3" maxlength="2000" placeholder="Describe any technical difficulties, or write None."></textarea>
                 </div>
                 <fieldset id="aiUsefulnessSection" class="pt-3 border-top">
                     <legend class="small fw-semibold text-dark mb-2">Please indicate how much you agree or disagree with each statement about the AI assistant.</legend>

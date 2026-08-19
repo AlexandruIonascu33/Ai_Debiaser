@@ -37,9 +37,8 @@ CONTROL_CONDITION = 'control'
 EXPERIMENTAL_CONDITIONS = (AI_ASSISTED_CONDITION, CONTROL_CONDITION)
 MAX_TEXT_LENGTH = 10_000
 MAX_AI_CONTEXT_LENGTH = 4_000
-MAX_AI_JUSTIFICATION_LENGTH = 1_000
+MAX_AI_JUSTIFICATION_LENGTH = 3_000
 MAX_AI_MESSAGE_LENGTH = 500
-MIN_AI_MESSAGE_LENGTH = 30
 MAX_AI_REQUESTS_PER_PROFILE = 5
 MAX_SUBMISSION_ID_LENGTH = 64
 PERFORMANCE_RECALL_CATEGORIES = {
@@ -491,9 +490,9 @@ def ai_chat():
             return jsonify({'status': 'error', 'message': 'The AI reflection limit for this candidate has been reached.'}), 429
 
         if not messages:
-            justification = get_text_value(data, 'justification', minimum_length=50, maximum_length=MAX_AI_JUSTIFICATION_LENGTH)
+            justification = get_text_value(data, 'justification', maximum_length=MAX_AI_JUSTIFICATION_LENGTH)
             if not justification:
-                return jsonify({'status': 'error', 'message': 'Provide a 50-1,000 character justification to begin the AI reflection.'}), 400
+                return jsonify({'status': 'error', 'message': 'Write a justification for the AI assistant before starting the reflection.'}), 400
             conversation = AIConversation(
                 participant_id=participant.id,
                 profile_id=profile_id,
@@ -503,9 +502,9 @@ def ai_chat():
             db.session.add(conversation)
             messages = [{'role': 'user', 'content': justification}]
         else:
-            message = get_text_value(data, 'message', minimum_length=MIN_AI_MESSAGE_LENGTH, maximum_length=MAX_AI_MESSAGE_LENGTH)
-            if not message:
-                return jsonify({'status': 'error', 'message': 'AI messages must contain 30-500 characters.'}), 400
+            message = get_text_value(data, 'message', maximum_length=MAX_AI_MESSAGE_LENGTH)
+            if message is None or not message:
+                return jsonify({'status': 'error', 'message': 'Write a message for the AI assistant before sending it.'}), 400
             messages = [*messages, {'role': 'user', 'content': message}]
 
         response = request_ai_reflection(evaluation_context, messages, messages[0]['content'])
@@ -539,6 +538,7 @@ def finish_session():
 
         demand_awareness = get_text_value(data, 'demand_awareness', minimum_length=1)
         rating_change_reason = get_text_value(data, 'rating_change_reason', minimum_length=1)
+        technical_difficulties = get_text_value(data, 'technical_difficulties', minimum_length=1, maximum_length=2_000)
         demographic_responses = get_demographic_responses(data)
         is_ai_assisted = participant.experimental_condition == AI_ASSISTED_CONDITION
         ai_usefulness = [data.get(f'ai_usefulness_{index}') for index in range(1, 4)]
@@ -546,6 +546,8 @@ def finish_session():
             return jsonify({'status': 'error', 'message': 'The final study-purpose question is required.'}), 400
         if not rating_change_reason:
             return jsonify({'status': 'error', 'message': 'A response about changes to evaluations is required.'}), 400
+        if not technical_difficulties:
+            return jsonify({'status': 'error', 'message': 'Please describe any technical difficulties, or enter None.'}), 400
         if not demographic_responses:
             return jsonify({'status': 'error', 'message': 'Please complete all demographic questions or select prefer not to say.'}), 400
         if is_ai_assisted and not all(is_valid_likert(response) for response in ai_usefulness):
@@ -553,6 +555,7 @@ def finish_session():
 
         participant.demand_awareness = demand_awareness
         participant.rating_change_reason = rating_change_reason
+        participant.technical_difficulties = technical_difficulties
         participant.demographic_age_range = demographic_responses['demographic_age_range']
         participant.demographic_gender = demographic_responses['demographic_gender']
         participant.demographic_work_status = demographic_responses['demographic_work_status']
@@ -622,7 +625,7 @@ def export_csv():
     write_csv_row(writer, [
         'trial_db_id', 'participant_id', 'recruitment_source', 'prolific_pid',
         'prolific_study_id', 'prolific_session_id', 'consent_given', 'consent_at',
-        'participant_status', 'study_version', 'resume_count', 'experimental_condition', 'session_start', 'completed_at', 'demand_awareness', 'rating_change_reason',
+        'participant_status', 'study_version', 'resume_count', 'experimental_condition', 'session_start', 'completed_at', 'demand_awareness', 'rating_change_reason', 'technical_difficulties',
         'ai_usefulness_1', 'ai_usefulness_2', 'ai_usefulness_3',
         'demographic_age_range', 'demographic_gender', 'demographic_work_status', 'demographic_work_field',
         'demographic_work_experience', 'demographic_nationality',
@@ -641,7 +644,7 @@ def export_csv():
             trial.id, participant.id, participant.recruitment_source, participant.prolific_pid,
             participant.prolific_study_id, participant.prolific_session_id, participant.consent_given,
             participant.consent_at, participant.status, participant.study_version, participant.resume_count, participant.experimental_condition, participant.created_at, participant.completed_at,
-            participant.demand_awareness, participant.rating_change_reason, participant.ai_usefulness_1, participant.ai_usefulness_2,
+            participant.demand_awareness, participant.rating_change_reason, participant.technical_difficulties, participant.ai_usefulness_1, participant.ai_usefulness_2,
             participant.ai_usefulness_3, participant.demographic_age_range, participant.demographic_gender,
             participant.demographic_work_status, participant.demographic_work_field, participant.demographic_work_experience,
             participant.demographic_nationality, trial.trial_order, trial.profile_id, trial.domain,
