@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from app import create_app
 from extensions import db
-from models import InitialEvaluation, Participant, Trial
+from models import AIConversation, InitialEvaluation, Participant, Trial
 from utils import get_completion_url
 
 
@@ -64,7 +64,7 @@ class ExperimentIntegrationTests(unittest.TestCase):
             'submission_id': f"initial-{trial_order}-{profile_id.replace('_', '-')}",
             'reaction_time_ms': 1200,
             'bonus_allocation': 500,
-            'attention_check': 2,
+            'attention_check': (2, 1, 4, 5)[trial_order - 1],
         }
         for field in ('lead_1', 'lead_2', 'lead_3', 'lead_4', 'prom_1', 'prom_2', 'prom_3'):
             payload[field] = 4
@@ -79,7 +79,7 @@ class ExperimentIntegrationTests(unittest.TestCase):
             'post_reaction_time_ms': 800,
             'justification_text': 'The available evidence supports this considered evaluation of the candidate.',
             'bonus_allocation_post': 1000,
-            'attention_check_post': 6,
+            'attention_check_post': (6, 3, 5, 1)[trial_order - 1],
         }
         for field in ('lead_1', 'lead_2', 'lead_3', 'lead_4', 'prom_1', 'prom_2', 'prom_3'):
             payload[f'{field}_post'] = 5
@@ -124,6 +124,26 @@ class ExperimentIntegrationTests(unittest.TestCase):
             initial_evaluation = InitialEvaluation.query.one()
             self.assertEqual(initial_evaluation.domain, 'IT')
             self.assertEqual(initial_evaluation.trial_order, 1)
+
+    def test_attention_check_failures_are_saved_for_manual_review(self):
+        session_data = self.start_prolific_session()
+        initial_payload = self.valid_initial_payload(session_data['participant_id'], 'it_2', 1)
+        initial_payload['attention_check'] = 7
+        initial_response = self.client.post('/api/save_initial_evaluation', json=initial_payload)
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+
+        final_payload = self.valid_final_payload(session_data['participant_id'], 'it_2', 1)
+        final_payload['attention_check_post'] = 2
+        final_response = self.client.post('/api/save_trial', json=final_payload)
+        self.assertEqual(final_response.status_code, 201, final_response.get_json())
+        with self.app.app_context():
+            initial_evaluation = InitialEvaluation.query.one()
+            trial = Trial.query.one()
+            participant = db.session.get(Participant, session_data['participant_id'])
+            self.assertEqual(participant.prolific_pid, 'participant-1')
+            self.assertEqual(participant.prolific_session_id, 'session-1')
+            self.assertEqual((initial_evaluation.attention_check, initial_evaluation.attention_check_expected), (7, 2))
+            self.assertEqual((trial.attention_check_post, trial.attention_check_post_expected), (2, 6))
 
     def test_api_rejects_non_object_json_without_creating_a_participant(self):
         response = self.client.post('/api/init_session', json=['invalid'])
@@ -262,8 +282,77 @@ class ExperimentIntegrationTests(unittest.TestCase):
         self.assertEqual(missing_reflection.status_code, 400)
 
         payload['ai_conversation'] = '[{"role":"user","content":"justification"},{"role":"assistant","content":"reflection"},{"role":"user","content":"I reconsidered the evidence and retained my evaluations."}]'
+        forged_conversation_response = self.client.post('/api/save_trial', json=payload)
+        self.assertEqual(forged_conversation_response.status_code, 400)
+        with self.app.app_context():
+            db.session.add(AIConversation(
+                participant_id=session_data['participant_id'],
+                profile_id='it_2',
+                request_count=2,
+                messages=[
+                    {'role': 'user', 'content': 'The available evidence supports this considered evaluation of the candidate.'},
+                    {'role': 'assistant', 'content': 'Consider whether each rating is supported by the available evidence.'},
+                    {'role': 'user', 'content': 'I reconsidered the evidence and retained my evaluations.'},
+                    {'role': 'assistant', 'content': 'That is a reasonable way to distinguish evidence from assumptions.'},
+                ],
+            ))
+            db.session.commit()
         saved_response = self.client.post('/api/save_trial', json=payload)
         self.assertEqual(saved_response.status_code, 201, saved_response.get_json())
+
+    def test_ai_chat_limits_messages_and_uses_server_owned_history(self):
+        session_data = self.start_prolific_session()
+        with self.app.app_context():
+            participant = db.session.get(Participant, session_data['participant_id'])
+            participant.experimental_condition = 'ai_assisted'
+            db.session.commit()
+        initial_response = self.client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+            session_data['participant_id'], 'it_2', 1
+        ))
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+
+        base_payload = {
+            'participant_id': session_data['participant_id'],
+            'profile_id': 'it_2',
+            'evaluation_context': {'profile_id': 'it_2'},
+        }
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}, clear=False), patch(
+            'routes.request_ai_reflection', side_effect=[
+                'First reflection.', 'Second reflection.', 'Third reflection.',
+                'Fourth reflection.', 'Fifth reflection.',
+            ]
+        ):
+            first_response = self.client.post('/api/ai_chat', json={
+                **base_payload,
+                'justification': 'The available evidence supports this considered evaluation of the candidate.',
+            })
+            self.assertEqual(first_response.status_code, 200, first_response.get_json())
+            self.assertEqual(len(first_response.get_json()['conversation']), 2)
+
+            short_message_response = self.client.post('/api/ai_chat', json={**base_payload, 'message': 'Too short'})
+            self.assertEqual(short_message_response.status_code, 400)
+
+            second_response = self.client.post('/api/ai_chat', json={
+                **base_payload,
+                'message': 'I reconsidered the evidence and retained my evaluations for the reasons described.',
+            })
+            self.assertEqual(second_response.status_code, 200, second_response.get_json())
+            self.assertEqual(len(second_response.get_json()['conversation']), 4)
+
+            for message in (
+                'I want to consider whether the performance record should affect each of my ratings.',
+                'I am comparing my original judgments with the performance evidence shown in the profile.',
+                'I have reviewed the distinction between performance, leadership, and promotability.',
+            ):
+                response = self.client.post('/api/ai_chat', json={**base_payload, 'message': message})
+                self.assertEqual(response.status_code, 200, response.get_json())
+            self.assertEqual(len(response.get_json()['conversation']), 10)
+
+            limit_response = self.client.post('/api/ai_chat', json={
+                **base_payload,
+                'message': 'I would like another response even though the reflection limit has been reached.',
+            })
+            self.assertEqual(limit_response.status_code, 429)
 
     def test_placeholder_completion_configuration_does_not_redirect_participants(self):
         participant = SimpleNamespace(recruitment_source='prolific')

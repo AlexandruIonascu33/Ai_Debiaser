@@ -21,6 +21,7 @@ class Participant(db.Model):
     study_version = db.Column(db.String(32), nullable=False, default='1.0.0')
     experimental_condition = db.Column(db.String(20), nullable=False, default='ai_assisted')
     profile_order = db.Column(db.JSON, nullable=True)
+    attention_check_plan = db.Column(db.JSON, nullable=True)
     current_trial_index = db.Column(db.Integer, nullable=False, default=0)
     resume_count = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default='started')
@@ -39,6 +40,7 @@ class Participant(db.Model):
 
     trials = db.relationship('Trial', backref='participant', lazy=True, cascade='all, delete-orphan')
     initial_evaluations = db.relationship('InitialEvaluation', backref='participant', lazy=True, cascade='all, delete-orphan')
+    ai_conversations = db.relationship('AIConversation', backref='participant', lazy=True, cascade='all, delete-orphan')
 
 
 class InitialEvaluation(db.Model):
@@ -66,6 +68,7 @@ class InitialEvaluation(db.Model):
     prom_3 = db.Column(db.Integer, nullable=False)
     bonus_allocation = db.Column(db.Integer, nullable=False)
     attention_check = db.Column(db.Integer, nullable=False)
+    attention_check_expected = db.Column(db.Integer, nullable=True)
 
 
 class Trial(db.Model):
@@ -91,6 +94,7 @@ class Trial(db.Model):
     prom_3_pre = db.Column(db.Integer, nullable=False)
     bonus_allocation_pre = db.Column(db.Integer, nullable=False)
     attention_check_pre = db.Column(db.Integer, nullable=True)
+    attention_check_pre_expected = db.Column(db.Integer, nullable=True)
 
     lead_1_post = db.Column(db.Integer, nullable=False)
     lead_2_post = db.Column(db.Integer, nullable=False)
@@ -101,6 +105,7 @@ class Trial(db.Model):
     prom_3_post = db.Column(db.Integer, nullable=False)
     bonus_allocation_post = db.Column(db.Integer, nullable=False)
     attention_check_post = db.Column(db.Integer, nullable=True)
+    attention_check_post_expected = db.Column(db.Integer, nullable=True)
 
     justification_text = db.Column(db.Text, nullable=True)
     ai_conversation = db.Column(db.Text, nullable=True)
@@ -109,3 +114,23 @@ class Trial(db.Model):
     performance_recall_error = db.Column(db.Integer, nullable=True)
     reaction_time_ms = db.Column(db.Integer, nullable=False)
     post_reaction_time_ms = db.Column(db.Integer, nullable=True)
+
+
+class AIConversation(db.Model):
+    __tablename__ = 'ai_conversations'
+    __table_args__ = (
+        db.UniqueConstraint('participant_id', 'profile_id', name='uq_ai_conversation_participant_profile'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    participant_id = db.Column(db.String(36), db.ForeignKey('participants.id'), nullable=False)
+    profile_id = db.Column(db.String(50), nullable=False)
+    request_count = db.Column(db.Integer, nullable=False, default=0)
+    messages = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

@@ -13,7 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
-from extensions import db, migrate
+from extensions import db, limiter, migrate
 from routes import main
 from utils import get_missing_production_settings
 
@@ -58,8 +58,14 @@ def create_app(test_config=None):
                 raise ValueError(f"Production configuration requires real values for: {', '.join(missing_settings)}.")
             app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    app.config.setdefault('AI_CHAT_RATE_LIMIT', os.environ.get('AI_CHAT_RATE_LIMIT', '30 per hour'))
+    app.config.setdefault('REQUIRE_PROLIFIC_METADATA', app.config['APP_ENV'] == 'production')
+    app.config.setdefault('MAX_CONTENT_LENGTH', 64 * 1024)
+    app.config.setdefault('RATELIMIT_STORAGE_URI', os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'))
+
     db.init_app(app)
     migrate.init_app(app, db)
+    limiter.init_app(app)
     app.register_blueprint(main)
 
     logging.basicConfig(
@@ -81,6 +87,9 @@ def create_app(test_config=None):
                 'request_completed request_id=%s method=%s path=%s status=%s duration_ms=%s',
                 g.get('request_id'), request.method, request.path, response.status_code, elapsed_ms
             )
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Referrer-Policy'] = 'same-origin'
         return response
 
     @app.errorhandler(Exception)

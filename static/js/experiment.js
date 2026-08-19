@@ -65,13 +65,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     ];
     const MIN_JUSTIFICATION_LENGTH = 50;
     const MIN_AI_RESPONSE_LENGTH = 30;
+    const MAX_AI_MESSAGE_LENGTH = 500;
     const AI_ASSISTED_CONDITION = 'ai_assisted';
-
-    const ATTENTION_CHECK_PLACEMENTS = [
-        { pre: { block: 'leadership', index: 1 }, post: { block: 'promotability', index: 0 } },
-        { pre: { block: 'promotability', index: 1 }, post: { block: 'leadership', index: 2 } },
-        { pre: { block: 'leadership', index: 0 }, post: { block: 'promotability', index: 2 } },
-        { pre: { block: 'promotability', index: 0 }, post: { block: 'leadership', index: 1 } }
+    const FIXED_ATTENTION_CHECKS = [
+        { pre: { block: 'leadership', index: 1, answer: 2 }, post: { block: 'promotability', index: 0, answer: 6 } },
+        { pre: { block: 'promotability', index: 1, answer: 1 }, post: { block: 'leadership', index: 2, answer: 3 } },
+        { pre: { block: 'leadership', index: 0, answer: 4 }, post: { block: 'promotability', index: 2, answer: 5 } },
+        { pre: { block: 'promotability', index: 0, answer: 5 }, post: { block: 'leadership', index: 1, answer: 1 } }
     ];
 
     // ==========================================
@@ -236,8 +236,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function renderEvaluationItems(phase) {
         const containerA = document.getElementById('blockA_container');
         const containerB = document.getElementById('blockB_container');
-        const placement = ATTENTION_CHECK_PLACEMENTS[STATE.currentTrial % ATTENTION_CHECK_PLACEMENTS.length][phase];
-        const expectedResponse = phase === 'pre' ? 2 : 6;
+        const placement = FIXED_ATTENTION_CHECKS[STATE.currentTrial % FIXED_ATTENTION_CHECKS.length][phase];
         containerA.innerHTML = '';
         containerB.innerHTML = '';
 
@@ -248,7 +247,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             createLikertScale(`likert_${id}`, id);
 
             if (placement.block === 'leadership' && placement.index === index) {
-                addAttentionCheck(containerA, expectedResponse);
+                addAttentionCheck(containerA, placement.answer);
             }
         });
 
@@ -259,7 +258,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             createLikertScale(`likert_${id}`, id);
 
             if (placement.block === 'promotability' && placement.index === index) {
-                addAttentionCheck(containerB, expectedResponse);
+                addAttentionCheck(containerB, placement.answer);
             }
         });
     }
@@ -566,16 +565,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     participant_id: STATE.participantId,
                     profile_id: STATE.stimuliList[STATE.currentTrial].id,
                     justification,
-                    evaluation_context: getAiEvaluationContext(),
-                    history: []
+                    evaluation_context: getAiEvaluationContext()
                 })
             });
             const data = await response.json();
 
             if (!response.ok) throw new Error(data.message || 'Error communicating with the AI.');
 
-            STATE.aiChatHistory.push({ role: 'user', content: justification });
-            STATE.aiChatHistory.push({ role: 'assistant', content: data.response });
+            STATE.aiChatHistory = data.conversation;
 
             displayChatMessages();
         } catch (error) {
@@ -604,9 +601,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             input.focus();
             return;
         }
+        if (message.length > MAX_AI_MESSAGE_LENGTH) {
+            alert('Please keep your response to 500 characters or fewer.');
+            input.focus();
+            return;
+        }
 
-        STATE.aiChatHistory.push({ role: 'user', content: message });
-        displayChatMessages();
         input.value = '';
         input.disabled = true;
 
@@ -618,13 +618,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                     participant_id: STATE.participantId,
                     profile_id: STATE.stimuliList[STATE.currentTrial].id,
                     evaluation_context: getAiEvaluationContext(),
-                    history: STATE.aiChatHistory
+                    message
                 })
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Error communicating with the AI.');
 
-            STATE.aiChatHistory.push({ role: 'assistant', content: data.response });
+            STATE.aiChatHistory = data.conversation;
             STATE.hasSentReflectionMessage = true;
             displayChatMessages();
             const finalInstruction = document.getElementById('finalEvaluationInstruction');
@@ -677,7 +677,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             submission_id: STATE.finalSubmissionId,
             post_reaction_time_ms: Math.round(performance.now() - STATE.phaseStartTime),
             justification_text: document.getElementById('justification_text').value.trim(),
-            ai_conversation: isAiAssistedCondition() && STATE.aiChatHistory.length > 0 ? JSON.stringify(STATE.aiChatHistory) : null,
         };
 
         for (const key in STATE.postEvaluationData) {

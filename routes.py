@@ -7,15 +7,16 @@ import os
 import secrets
 from datetime import datetime, timezone
 
-from flask import Blueprint, Response, jsonify, redirect, render_template, request, session
+from flask import Blueprint, Response, current_app, jsonify, redirect, render_template, request, session
 from sqlalchemy import select
 
-from extensions import db
-from models import InitialEvaluation, Participant, Trial
+from extensions import db, limiter
+from models import AIConversation, InitialEvaluation, Participant, Trial
 from utils import (
     admin_required,
     get_active_participant,
     get_admin_key,
+    get_attention_check_expected,
     get_completion_url,
     get_prolific_metadata,
     is_valid_bonus_allocation,
@@ -35,6 +36,11 @@ AI_ASSISTED_CONDITION = 'ai_assisted'
 CONTROL_CONDITION = 'control'
 EXPERIMENTAL_CONDITIONS = (AI_ASSISTED_CONDITION, CONTROL_CONDITION)
 MAX_TEXT_LENGTH = 10_000
+MAX_AI_CONTEXT_LENGTH = 4_000
+MAX_AI_JUSTIFICATION_LENGTH = 1_000
+MAX_AI_MESSAGE_LENGTH = 500
+MIN_AI_MESSAGE_LENGTH = 30
+MAX_AI_REQUESTS_PER_PROFILE = 5
 MAX_SUBMISSION_ID_LENGTH = 64
 PERFORMANCE_RECALL_CATEGORIES = {
     'low_performance',
@@ -192,6 +198,8 @@ def init_session():
 
         recruitment_metadata = session.get('recruitment_metadata', {})
         recruitment_source = session.get('recruitment_source', 'direct')
+        if current_app.config['REQUIRE_PROLIFIC_METADATA'] and not all(recruitment_metadata.values()):
+            return jsonify({'status': 'error', 'message': 'This study must be started from its Prolific link.'}), 403
         participant = db.session.get(Participant, session.get('participant_id'))
         if participant and participant.status == 'completed':
             return jsonify({'status': 'error', 'message': 'This study session has already been completed.'}), 409
@@ -277,6 +285,9 @@ def save_initial_evaluation():
             return jsonify({'status': 'error', 'message': 'All Likert responses must be integers from 1 to 7.'}), 400
         if not is_valid_likert(data.get('attention_check')):
             return jsonify({'status': 'error', 'message': 'The instruction-check response is required.'}), 400
+        attention_check_expected = get_attention_check_expected(profile_order, profile_id, 'pre')
+        if not attention_check_expected:
+            return jsonify({'status': 'error', 'message': 'The instruction-check configuration is unavailable.'}), 500
         if not is_valid_bonus_allocation(data.get('bonus_allocation')):
             return jsonify({'status': 'error', 'message': 'The bonus allocation must be a valid amount between $0 and $3,000.'}), 400
         if not is_valid_reaction_time(data.get('reaction_time_ms')):
@@ -304,6 +315,7 @@ def save_initial_evaluation():
             lead_1=data['lead_1'], lead_2=data['lead_2'], lead_3=data['lead_3'], lead_4=data['lead_4'],
             prom_1=data['prom_1'], prom_2=data['prom_2'], prom_3=data['prom_3'],
             bonus_allocation=data['bonus_allocation'], attention_check=data['attention_check'],
+            attention_check_expected=attention_check_expected,
         )
         db.session.add(initial_evaluation)
         db.session.commit()
@@ -354,6 +366,9 @@ def save_trial():
             return jsonify({'status': 'error', 'message': 'All Likert responses must be integers from 1 to 7.'}), 400
         if not is_valid_likert(data.get('attention_check_post')):
             return jsonify({'status': 'error', 'message': 'The instruction-check response is required.'}), 400
+        attention_check_post_expected = get_attention_check_expected(profile_order, profile_id, 'post')
+        if not attention_check_post_expected:
+            return jsonify({'status': 'error', 'message': 'The instruction-check configuration is unavailable.'}), 500
         if not is_valid_bonus_allocation(data.get('bonus_allocation_post')):
             return jsonify({'status': 'error', 'message': 'The bonus allocation must be a valid amount between $0 and $3,000.'}), 400
         post_reaction_time_ms = data.get('post_reaction_time_ms')
@@ -364,9 +379,14 @@ def save_trial():
             return jsonify({'status': 'error', 'message': 'Please explain your reasoning in a few words before continuing.'}), 400
 
         is_ai_assisted = participant.experimental_condition == AI_ASSISTED_CONDITION
-        ai_conversation = data.get('ai_conversation') if is_ai_assisted else None
-        if is_ai_assisted and not has_reflection_message(ai_conversation):
-            return jsonify({'status': 'error', 'message': 'Please send the AI assistant a short response before continuing.'}), 400
+        ai_conversation = None
+        if is_ai_assisted:
+            conversation = AIConversation.query.filter_by(
+                participant_id=participant.id, profile_id=profile_id
+            ).first()
+            if not conversation or not has_reflection_message(conversation.messages):
+                return jsonify({'status': 'error', 'message': 'Please send the AI assistant a short response before continuing.'}), 400
+            ai_conversation = json.dumps(conversation.messages, ensure_ascii=True)
 
         trial = Trial(
             participant_id=participant.id,
@@ -384,6 +404,8 @@ def save_trial():
             prom_1_post=data['prom_1_post'], prom_2_post=data['prom_2_post'],
             prom_3_post=data['prom_3_post'], bonus_allocation_post=data['bonus_allocation_post'],
             attention_check_post=data['attention_check_post'],
+            attention_check_pre_expected=initial_evaluation.attention_check_expected,
+            attention_check_post_expected=attention_check_post_expected,
             justification_text=justification_text,
             ai_conversation=ai_conversation,
             reaction_time_ms=initial_evaluation.reaction_time_ms + post_reaction_time_ms,
@@ -436,44 +458,67 @@ def save_final_recall():
 
 
 @main.route('/api/ai_chat', methods=['POST'])
+@limiter.limit(lambda: current_app.config['AI_CHAT_RATE_LIMIT'])
 def ai_chat():
     data = get_json_object()
     if data is None:
         return jsonify({'status': 'error', 'message': 'A JSON object is required.'}), 400
-    participant = get_active_participant(data)
-    profile_id = data.get('profile_id')
-    evaluation_context = data.get('evaluation_context')
-    history = data.get('history', [])
-    justification = data.get('justification', '')
-
-    if not participant:
-        return jsonify({'status': 'error', 'message': 'No active participant session.'}), 401
-    if participant.experimental_condition != AI_ASSISTED_CONDITION:
-        return jsonify({'status': 'error', 'message': 'AI reflection is not available for this study condition.'}), 403
-    if not os.environ.get('OPENAI_API_KEY'):
-        return jsonify({'status': 'error', 'message': 'The OpenAI API key is not configured.'}), 500
-    if not isinstance(profile_id, str) or not isinstance(justification, str) or not isinstance(history, list):
-        return jsonify({'status': 'error', 'message': 'A valid AI reflection request is required.'}), 400
-    if len(justification.strip()) > MAX_TEXT_LENGTH or len(history) > 20:
-        return jsonify({'status': 'error', 'message': 'The AI reflection request is too large.'}), 400
-    if any(
-        not isinstance(message, dict)
-        or message.get('role') not in {'user', 'assistant'}
-        or not isinstance(message.get('content'), str)
-        or len(message['content']) > MAX_TEXT_LENGTH
-        for message in history
-    ):
-        return jsonify({'status': 'error', 'message': 'The AI reflection history is invalid.'}), 400
-    profile_order = participant.profile_order or []
-    if participant.current_trial_index >= len(profile_order) or profile_id != profile_order[participant.current_trial_index]:
-        return jsonify({'status': 'error', 'message': 'The AI context does not match the active profile.'}), 400
-    if not isinstance(evaluation_context, dict) or evaluation_context.get('profile_id') != profile_id:
-        return jsonify({'status': 'error', 'message': 'A valid profile-specific evaluation context is required.'}), 400
-
     try:
-        response = request_ai_reflection(evaluation_context, history, justification)
-        return jsonify({'status': 'success', 'response': response})
+        participant = get_locked_participant(data)
+        profile_id = data.get('profile_id')
+        evaluation_context = data.get('evaluation_context')
+        if not participant:
+            return jsonify({'status': 'error', 'message': 'No active participant session.'}), 401
+        if participant.experimental_condition != AI_ASSISTED_CONDITION:
+            return jsonify({'status': 'error', 'message': 'AI reflection is not available for this study condition.'}), 403
+        if not os.environ.get('OPENAI_API_KEY'):
+            return jsonify({'status': 'error', 'message': 'The OpenAI API key is not configured.'}), 500
+        if not isinstance(profile_id, str) or not isinstance(evaluation_context, dict) or evaluation_context.get('profile_id') != profile_id:
+            return jsonify({'status': 'error', 'message': 'A valid profile-specific AI reflection request is required.'}), 400
+        if len(json.dumps(evaluation_context, ensure_ascii=True)) > MAX_AI_CONTEXT_LENGTH:
+            return jsonify({'status': 'error', 'message': 'The AI reflection context is too large.'}), 400
+        profile_order = participant.profile_order or []
+        if participant.current_trial_index >= len(profile_order) or profile_id != profile_order[participant.current_trial_index]:
+            return jsonify({'status': 'error', 'message': 'The AI context does not match the active profile.'}), 400
+        if not InitialEvaluation.query.filter_by(participant_id=participant.id, profile_id=profile_id).first():
+            return jsonify({'status': 'error', 'message': 'Save the initial evaluation before starting the AI reflection.'}), 409
+
+        conversation = AIConversation.query.filter_by(
+            participant_id=participant.id, profile_id=profile_id
+        ).with_for_update().first()
+        messages = conversation.messages if conversation else []
+        if conversation and conversation.request_count >= MAX_AI_REQUESTS_PER_PROFILE:
+            return jsonify({'status': 'error', 'message': 'The AI reflection limit for this candidate has been reached.'}), 429
+
+        if not messages:
+            justification = get_text_value(data, 'justification', minimum_length=50, maximum_length=MAX_AI_JUSTIFICATION_LENGTH)
+            if not justification:
+                return jsonify({'status': 'error', 'message': 'Provide a 50-1,000 character justification to begin the AI reflection.'}), 400
+            conversation = AIConversation(
+                participant_id=participant.id,
+                profile_id=profile_id,
+                request_count=0,
+                messages=[],
+            )
+            db.session.add(conversation)
+            messages = [{'role': 'user', 'content': justification}]
+        else:
+            message = get_text_value(data, 'message', minimum_length=MIN_AI_MESSAGE_LENGTH, maximum_length=MAX_AI_MESSAGE_LENGTH)
+            if not message:
+                return jsonify({'status': 'error', 'message': 'AI messages must contain 30-500 characters.'}), 400
+            messages = [*messages, {'role': 'user', 'content': message}]
+
+        response = request_ai_reflection(evaluation_context, messages, messages[0]['content'])
+        conversation.messages = [*messages, {'role': 'assistant', 'content': response}]
+        conversation.request_count += 1
+        db.session.commit()
+        return jsonify({
+            'status': 'success',
+            'conversation': conversation.messages,
+            'remaining_responses': MAX_AI_REQUESTS_PER_PROFILE - conversation.request_count,
+        })
     except Exception:
+        db.session.rollback()
         logger.exception('AI reflection request failed')
         return jsonify({'status': 'error', 'message': 'The AI assistant is temporarily unavailable. Please try again.'}), 502
 
@@ -584,10 +629,10 @@ def export_csv():
         'trial_order', 'profile_id', 'domain',
         'lead_1_pre', 'lead_2_pre', 'lead_3_pre', 'lead_4_pre',
         'prom_1_pre', 'prom_2_pre', 'prom_3_pre', 'bonus_allocation_pre',
-        'attention_check_pre', 'attention_check_pre_correct',
+        'attention_check_pre', 'attention_check_pre_expected', 'attention_check_pre_correct',
         'lead_1_post', 'lead_2_post', 'lead_3_post', 'lead_4_post',
         'prom_1_post', 'prom_2_post', 'prom_3_post', 'bonus_allocation_post',
-        'attention_check_post', 'attention_check_post_correct',
+        'attention_check_post', 'attention_check_post_expected', 'attention_check_post_correct',
         'justification_text', 'ai_conversation', 'recalled_performance_score', 'recalled_performance_category',
         'performance_recall_error', 'reaction_time_ms'
     ])
@@ -602,10 +647,12 @@ def export_csv():
             participant.demographic_nationality, trial.trial_order, trial.profile_id, trial.domain,
             trial.lead_1_pre, trial.lead_2_pre, trial.lead_3_pre, trial.lead_4_pre,
             trial.prom_1_pre, trial.prom_2_pre, trial.prom_3_pre, trial.bonus_allocation_pre,
-            trial.attention_check_pre, trial.attention_check_pre == 2,
+            trial.attention_check_pre, trial.attention_check_pre_expected,
+            trial.attention_check_pre == trial.attention_check_pre_expected,
             trial.lead_1_post, trial.lead_2_post, trial.lead_3_post, trial.lead_4_post,
             trial.prom_1_post, trial.prom_2_post, trial.prom_3_post, trial.bonus_allocation_post,
-            trial.attention_check_post, trial.attention_check_post == 6,
+            trial.attention_check_post, trial.attention_check_post_expected,
+            trial.attention_check_post == trial.attention_check_post_expected,
             trial.justification_text, trial.ai_conversation, trial.recalled_performance_score, trial.recalled_performance_category,
             trial.performance_recall_error,
             trial.reaction_time_ms
@@ -634,7 +681,7 @@ def export_initial_evaluations_csv():
         'participant_status', 'study_version', 'resume_count', 'experimental_condition', 'session_start',
         'trial_order', 'profile_id', 'domain', 'initial_submission_id', 'initial_saved_at',
         'lead_1_pre', 'lead_2_pre', 'lead_3_pre', 'lead_4_pre', 'prom_1_pre', 'prom_2_pre', 'prom_3_pre',
-        'bonus_allocation_pre', 'attention_check_pre', 'attention_check_pre_correct', 'initial_reaction_time_ms',
+        'bonus_allocation_pre', 'attention_check_pre', 'attention_check_pre_expected', 'attention_check_pre_correct', 'initial_reaction_time_ms',
         'final_evaluation_saved', 'final_submission_id',
     ])
     for initial_evaluation, participant, trial in query:
@@ -646,7 +693,9 @@ def export_initial_evaluations_csv():
             initial_evaluation.lead_1, initial_evaluation.lead_2, initial_evaluation.lead_3, initial_evaluation.lead_4,
             initial_evaluation.prom_1, initial_evaluation.prom_2, initial_evaluation.prom_3,
             initial_evaluation.bonus_allocation, initial_evaluation.attention_check,
-            initial_evaluation.attention_check == 2, initial_evaluation.reaction_time_ms,
+            initial_evaluation.attention_check_expected,
+            initial_evaluation.attention_check == initial_evaluation.attention_check_expected,
+            initial_evaluation.reaction_time_ms,
             trial is not None, trial.submission_id if trial else None,
         ])
     return Response(
