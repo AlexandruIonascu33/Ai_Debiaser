@@ -19,11 +19,12 @@ PROFILE_CATEGORIES = {
     'sales_5': 'low_performance',
 }
 FINAL_DEMOGRAPHICS = {
-    'demographic_age_range': '25-34',
+    'demographic_age': 30,
     'demographic_gender': 'prefer_not_to_say',
     'demographic_work_status': 'employed_full_time',
     'demographic_work_field': 'technology',
-    'demographic_work_experience': '4_to_7_years',
+    'demographic_years_experience': 6,
+    'demographic_leadership_position': 'no',
     'demographic_nationality': 'Romanian',
     'technical_difficulties': 'None',
 }
@@ -481,7 +482,9 @@ class ExperimentIntegrationTests(unittest.TestCase):
         self.assertEqual(len({row['profile_id'] for row in rows}), 4)
         self.assertTrue(all(row['recalled_performance_score'] for row in rows))
         self.assertTrue(all(row['recalled_performance_category'] for row in rows))
-        self.assertEqual(rows[0]['demographic_age_range'], FINAL_DEMOGRAPHICS['demographic_age_range'])
+        self.assertEqual(rows[0]['demographic_age'], str(FINAL_DEMOGRAPHICS['demographic_age']))
+        self.assertEqual(rows[0]['demographic_years_experience'], str(FINAL_DEMOGRAPHICS['demographic_years_experience']))
+        self.assertEqual(rows[0]['demographic_leadership_position'], FINAL_DEMOGRAPHICS['demographic_leadership_position'])
         self.assertEqual(rows[0]['demographic_nationality'], FINAL_DEMOGRAPHICS['demographic_nationality'])
         self.assertEqual(rows[0]['technical_difficulties'], FINAL_DEMOGRAPHICS['technical_difficulties'])
 

@@ -266,17 +266,8 @@
                     <p class="small text-muted">Please select “Prefer not to say” for any question you do not wish to answer.</p>
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold" for="demographic_age_range">Age range</label>
-                            <select class="form-select" id="demographic_age_range">
-                                <option value="">Select an option</option>
-                                <option value="18-24">18-24</option>
-                                <option value="25-34">25-34</option>
-                                <option value="35-44">35-44</option>
-                                <option value="45-54">45-54</option>
-                                <option value="55-64">55-64</option>
-                                <option value="65_or_older">65 or older</option>
-                                <option value="prefer_not_to_say">Prefer not to say</option>
-                            </select>
+                            <label class="form-label fw-semibold" for="demographic_age">Age</label>
+                            <input type="number" class="form-control" id="demographic_age" min="18" max="120" step="1" inputmode="numeric" placeholder="Enter your age in years">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="demographic_gender">Gender</label>
@@ -321,20 +312,21 @@
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold" for="demographic_work_experience">Years of work experience</label>
-                            <select class="form-select" id="demographic_work_experience">
+                            <label class="form-label fw-semibold" for="demographic_years_experience">Years of work experience</label>
+                            <input type="number" class="form-control" id="demographic_years_experience" min="0" max="100" step="1" inputmode="numeric" placeholder="Enter whole years of experience">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="demographic_leadership_position">Do you currently hold a leadership or management position?</label>
+                            <select class="form-select" id="demographic_leadership_position">
                                 <option value="">Select an option</option>
-                                <option value="less_than_1_year">Less than 1 year</option>
-                                <option value="1_to_3_years">1-3 years</option>
-                                <option value="4_to_7_years">4-7 years</option>
-                                <option value="8_to_15_years">8-15 years</option>
-                                <option value="more_than_15_years">More than 15 years</option>
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
                                 <option value="prefer_not_to_say">Prefer not to say</option>
                             </select>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold" for="demographic_nationality">Nationality</label>
-                            <input class="form-control" id="demographic_nationality" maxlength="128" placeholder="For example, Romanian or Prefer not to say">
+                            <input class="form-control" id="demographic_nationality" maxlength="128" placeholder="For example, Spanish or Prefer not to say">
                         </div>
                     </div>
                 </fieldset>

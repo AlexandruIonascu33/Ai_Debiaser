@@ -148,10 +148,13 @@ def ensure_schema_columns():
         'ai_usefulness_2': 'INTEGER',
         'ai_usefulness_3': 'INTEGER',
         'demographic_age_range': 'VARCHAR(32)',
+        'demographic_age': 'INTEGER',
         'demographic_gender': 'VARCHAR(64)',
         'demographic_work_status': 'VARCHAR(64)',
         'demographic_work_field': 'VARCHAR(128)',
         'demographic_work_experience': 'VARCHAR(32)',
+        'demographic_years_experience': 'INTEGER',
+        'demographic_leadership_position': 'VARCHAR(32)',
         'demographic_nationality': 'VARCHAR(128)',
     }
     with db.engine.begin() as connection:

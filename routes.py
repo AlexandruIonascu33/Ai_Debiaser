@@ -48,9 +48,6 @@ PERFORMANCE_RECALL_CATEGORIES = {
     'do_not_remember',
 }
 DEMOGRAPHIC_OPTIONS = {
-    'demographic_age_range': {
-        '18-24', '25-34', '35-44', '45-54', '55-64', '65_or_older', 'prefer_not_to_say',
-    },
     'demographic_gender': {
         'woman', 'man', 'non_binary', 'self_describe', 'prefer_not_to_say',
     },
@@ -63,9 +60,8 @@ DEMOGRAPHIC_OPTIONS = {
         'education', 'public_sector', 'engineering_manufacturing', 'customer_service',
         'other', 'prefer_not_to_say',
     },
-    'demographic_work_experience': {
-        'less_than_1_year', '1_to_3_years', '4_to_7_years', '8_to_15_years',
-        'more_than_15_years', 'prefer_not_to_say',
+    'demographic_leadership_position': {
+        'yes', 'no', 'prefer_not_to_say',
     },
 }
 
@@ -105,6 +101,15 @@ def get_text_value(data, field_name, minimum_length=0, maximum_length=MAX_TEXT_L
     return value
 
 
+def get_bounded_integer(data, field_name, minimum_value, maximum_value):
+    value = data.get(field_name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if not minimum_value <= value <= maximum_value:
+        return None
+    return value
+
+
 def get_demographic_responses(data):
     responses = {}
     for field_name, accepted_values in DEMOGRAPHIC_OPTIONS.items():
@@ -112,6 +117,13 @@ def get_demographic_responses(data):
         if value not in accepted_values:
             return None
         responses[field_name] = value
+
+    age = get_bounded_integer(data, 'demographic_age', minimum_value=18, maximum_value=120)
+    years_experience = get_bounded_integer(data, 'demographic_years_experience', minimum_value=0, maximum_value=100)
+    if age is None or years_experience is None:
+        return None
+    responses['demographic_age'] = age
+    responses['demographic_years_experience'] = years_experience
 
     nationality = get_text_value(data, 'demographic_nationality', minimum_length=1, maximum_length=128)
     if not nationality:
@@ -556,11 +568,12 @@ def finish_session():
         participant.demand_awareness = demand_awareness
         participant.rating_change_reason = rating_change_reason
         participant.technical_difficulties = technical_difficulties
-        participant.demographic_age_range = demographic_responses['demographic_age_range']
+        participant.demographic_age = demographic_responses['demographic_age']
         participant.demographic_gender = demographic_responses['demographic_gender']
         participant.demographic_work_status = demographic_responses['demographic_work_status']
         participant.demographic_work_field = demographic_responses['demographic_work_field']
-        participant.demographic_work_experience = demographic_responses['demographic_work_experience']
+        participant.demographic_years_experience = demographic_responses['demographic_years_experience']
+        participant.demographic_leadership_position = demographic_responses['demographic_leadership_position']
         participant.demographic_nationality = demographic_responses['demographic_nationality']
         if is_ai_assisted:
             participant.ai_usefulness_1, participant.ai_usefulness_2, participant.ai_usefulness_3 = ai_usefulness
@@ -627,8 +640,8 @@ def export_csv():
         'prolific_study_id', 'prolific_session_id', 'consent_given', 'consent_at',
         'participant_status', 'study_version', 'resume_count', 'experimental_condition', 'session_start', 'completed_at', 'demand_awareness', 'rating_change_reason', 'technical_difficulties',
         'ai_usefulness_1', 'ai_usefulness_2', 'ai_usefulness_3',
-        'demographic_age_range', 'demographic_gender', 'demographic_work_status', 'demographic_work_field',
-        'demographic_work_experience', 'demographic_nationality',
+        'demographic_age_range', 'demographic_age', 'demographic_gender', 'demographic_work_status', 'demographic_work_field',
+        'demographic_work_experience', 'demographic_years_experience', 'demographic_leadership_position', 'demographic_nationality',
         'trial_order', 'profile_id', 'domain',
         'lead_1_pre', 'lead_2_pre', 'lead_3_pre', 'lead_4_pre',
         'prom_1_pre', 'prom_2_pre', 'prom_3_pre', 'bonus_allocation_pre',
@@ -645,9 +658,11 @@ def export_csv():
             participant.prolific_study_id, participant.prolific_session_id, participant.consent_given,
             participant.consent_at, participant.status, participant.study_version, participant.resume_count, participant.experimental_condition, participant.created_at, participant.completed_at,
             participant.demand_awareness, participant.rating_change_reason, participant.technical_difficulties, participant.ai_usefulness_1, participant.ai_usefulness_2,
-            participant.ai_usefulness_3, participant.demographic_age_range, participant.demographic_gender,
-            participant.demographic_work_status, participant.demographic_work_field, participant.demographic_work_experience,
-            participant.demographic_nationality, trial.trial_order, trial.profile_id, trial.domain,
+            participant.ai_usefulness_3, participant.demographic_age_range, participant.demographic_age,
+            participant.demographic_gender, participant.demographic_work_status, participant.demographic_work_field,
+            participant.demographic_work_experience, participant.demographic_years_experience,
+            participant.demographic_leadership_position, participant.demographic_nationality, trial.trial_order,
+            trial.profile_id, trial.domain,
             trial.lead_1_pre, trial.lead_2_pre, trial.lead_3_pre, trial.lead_4_pre,
             trial.prom_1_pre, trial.prom_2_pre, trial.prom_3_pre, trial.bonus_allocation_pre,
             trial.attention_check_pre, trial.attention_check_pre_expected,

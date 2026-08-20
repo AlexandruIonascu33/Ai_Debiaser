@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         finalSubmissionId: null,
         aiChatHistory: [],
         hasSentReflectionMessage: false,
+        hasReturnedToEvaluation: false,
         isChatActive: false,
         hasAdjustedBonusSlider: false,
         experimentalCondition: null
@@ -190,8 +191,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         aiChatLaunch.classList.toggle('d-none', !isAiAssisted);
         aiUsefulnessSection.classList.toggle('d-none', !isAiAssisted);
         justificationInstruction.innerText = isAiAssisted
-            ? 'Please explain the reasoning behind your ratings in a few words. You will then discuss your reasoning with the AI assistant before completing your final evaluation.'
-            : 'Please explain the reasoning behind your ratings in a few words. After your justification, you may confirm or revise your final evaluation.';
+            ? `Write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters, then discuss your reasoning with the AI assistant before completing your final evaluation.`
+            : `Write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters before completing your final evaluation.`;
 
         if (!isAiAssisted) {
             finalInstruction.innerText = 'After completing your justification, please confirm or, if appropriate, revise your final evaluations for this candidate.';
@@ -357,6 +358,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         STATE.finalSubmissionId = null;
         STATE.aiChatHistory = [];
         STATE.hasSentReflectionMessage = false;
+        STATE.hasReturnedToEvaluation = false;
         STATE.isChatActive = false;
         document.getElementById('justification_text').value = '';
         closeChatPanel();
@@ -448,9 +450,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         STATE.phaseStartTime = performance.now();
         renderEvaluationItems('post');
         document.getElementById('btnNext').classList.add('d-none');
-        document.getElementById('postEvaluationActions').classList.remove('d-none');
+        document.getElementById('postEvaluationActions').classList.add('d-none');
         const submitButton = document.getElementById('btnSubmitFinalEvaluation');
-        submitButton.disabled = isAiAssistedCondition();
+        submitButton.disabled = false;
         submitButton.innerText = 'SUBMIT EVALUATION AND CONTINUE';
         updatePostEvaluationActions();
         showPerformanceTransitionModal();
@@ -462,22 +464,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         const justificationText = document.getElementById('justification_text').value.trim();
         const submitButton = document.getElementById('btnSubmitFinalEvaluation');
         const finalInstruction = document.getElementById('finalEvaluationInstruction');
-        document.getElementById('postEvaluationActions').classList.remove('d-none');
+        const prerequisitesMet = justificationText.length >= MIN_JUSTIFICATION_LENGTH
+            && (!isAiAssistedCondition() || STATE.hasSentReflectionMessage);
+        document.getElementById('postEvaluationActions').classList.toggle('d-none', !prerequisitesMet);
+        submitButton.disabled = false;
 
-        if (isAiAssistedCondition()) {
-            submitButton.disabled = !STATE.hasSentReflectionMessage;
-            finalInstruction.innerHTML = STATE.hasSentReflectionMessage
-                ? '<strong>Thank you for reflecting.</strong> Taking the discussion into account, please now <strong>confirm or, if appropriate, revise your final evaluations</strong> for this candidate.'
-                : `To continue, write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters and send at least one message to the AI assistant.`;
-            finalInstruction.classList.remove('d-none');
-        } else {
-            submitButton.disabled = justificationText.length < MIN_JUSTIFICATION_LENGTH;
-            finalInstruction.classList.toggle('d-none', justificationText.length < MIN_JUSTIFICATION_LENGTH);
+        if (!prerequisitesMet) {
+            STATE.hasReturnedToEvaluation = false;
         }
 
+        if (isAiAssistedCondition()) {
+            finalInstruction.innerHTML = STATE.hasSentReflectionMessage
+                ? '<strong>Next, select Return to Evaluation.</strong> Then confirm or, if appropriate, revise your final evaluations for this candidate before submitting.'
+                : `To continue, write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters and send at least one message to the AI assistant.`;
+        } else {
+            finalInstruction.innerHTML = '<strong>Next, select Return to Evaluation.</strong> Then confirm or, if appropriate, revise your final evaluations for this candidate before submitting.';
+        }
+        finalInstruction.classList.toggle('d-none', !prerequisitesMet);
     }
 
     function returnToEvaluation() {
+        STATE.hasReturnedToEvaluation = true;
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -521,6 +528,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // --- PHASE 2: POST-PERFORMANCE EVALUATION & JUSTIFICATION ---
         if (STATE.evaluationPhase === 'post') {
+            if (!STATE.hasReturnedToEvaluation) {
+                alert('Please select Return to Evaluation before submitting. Review and, if appropriate, revise your ratings first.');
+                return;
+            }
+
             const evaluationData = collectEvaluationData();
             if (!evaluationData) return; // Validation failed
     
@@ -844,8 +856,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         const demographics = {};
         const demographicFields = [
-            'demographic_age_range', 'demographic_gender', 'demographic_work_status',
-            'demographic_work_field', 'demographic_work_experience'
+            'demographic_gender', 'demographic_work_status', 'demographic_work_field',
+            'demographic_leadership_position'
         ];
         for (const fieldName of demographicFields) {
             const field = document.getElementById(fieldName);
@@ -855,6 +867,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
             demographics[fieldName] = field.value;
+        }
+        const numericDemographicFields = [
+            { name: 'demographic_age', minimum: 18, maximum: 120, label: 'age' },
+            { name: 'demographic_years_experience', minimum: 0, maximum: 100, label: 'years of work experience' }
+        ];
+        for (const { name, minimum, maximum, label } of numericDemographicFields) {
+            const field = document.getElementById(name);
+            const value = Number(field.value);
+            if (!Number.isInteger(value) || value < minimum || value > maximum) {
+                alert(`Please enter a whole-number ${label} between ${minimum} and ${maximum}.`);
+                field.focus();
+                return;
+            }
+            demographics[name] = value;
         }
         const nationality = document.getElementById('demographic_nationality').value.trim();
         if (!nationality) {

@@ -33,10 +33,13 @@ class Participant(db.Model):
     ai_usefulness_2 = db.Column(db.Integer, nullable=True)
     ai_usefulness_3 = db.Column(db.Integer, nullable=True)
     demographic_age_range = db.Column(db.String(32), nullable=True)
+    demographic_age = db.Column(db.Integer, nullable=True)
     demographic_gender = db.Column(db.String(64), nullable=True)
     demographic_work_status = db.Column(db.String(64), nullable=True)
     demographic_work_field = db.Column(db.String(128), nullable=True)
     demographic_work_experience = db.Column(db.String(32), nullable=True)
+    demographic_years_experience = db.Column(db.Integer, nullable=True)
+    demographic_leadership_position = db.Column(db.String(32), nullable=True)
     demographic_nationality = db.Column(db.String(128), nullable=True)
 
     trials = db.relationship('Trial', backref='participant', lazy=True, cascade='all, delete-orphan')
