@@ -213,6 +213,37 @@ class ExperimentIntegrationTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(Trial.query.one().lead_1_pre, 4)
 
+    def test_resumed_post_evaluation_reports_saved_ai_reflection(self):
+        session_data = self.start_prolific_session()
+        initial_response = self.client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+            session_data['participant_id'], 'it_2', 1
+        ))
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+        with self.app.app_context():
+            participant = db.session.get(Participant, session_data['participant_id'])
+            participant.experimental_condition = 'ai_assisted'
+            db.session.add(AIConversation(
+                participant_id=participant.id,
+                profile_id='it_2',
+                request_count=2,
+                messages=[
+                    {'role': 'user', 'content': 'The performance evidence supports my evaluation.'},
+                    {'role': 'assistant', 'content': 'Review the evidence for each rating.'},
+                    {'role': 'user', 'content': 'OK'},
+                    {'role': 'assistant', 'content': 'You can now reconsider the ratings.'},
+                ],
+            ))
+            db.session.commit()
+
+        resumed_response = self.client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': PROFILE_ORDER,
+        })
+
+        self.assertEqual(resumed_response.status_code, 201, resumed_response.get_json())
+        self.assertEqual(resumed_response.get_json()['study_stage'], 'post_evaluation')
+        self.assertTrue(resumed_response.get_json()['has_reflection_message'])
+
     def test_refresh_resumes_the_active_direct_participant_session(self):
         self.client.get('/')
         session_data = self.client.post('/api/init_session', json={
@@ -292,7 +323,7 @@ class ExperimentIntegrationTests(unittest.TestCase):
         self.assertEqual(rows[0]['demand_awareness'], "'=HYPERLINK(\"https://example.test\")")
         self.assertEqual(rows[0]['rating_change_reason'], "'+formula")
 
-    def test_ai_condition_requires_a_substantive_reflection_message(self):
+    def test_ai_condition_requires_a_reflection_message(self):
         session_data = self.start_prolific_session()
         with self.app.app_context():
             participant = db.session.get(Participant, session_data['participant_id'])
@@ -317,7 +348,7 @@ class ExperimentIntegrationTests(unittest.TestCase):
                 messages=[
                     {'role': 'user', 'content': 'The available evidence supports this considered evaluation of the candidate.'},
                     {'role': 'assistant', 'content': 'Consider whether each rating is supported by the available evidence.'},
-                    {'role': 'user', 'content': 'I reconsidered the evidence and retained my evaluations.'},
+                    {'role': 'user', 'content': 'OK'},
                     {'role': 'assistant', 'content': 'That is a reasonable way to distinguish evidence from assumptions.'},
                 ],
             ))

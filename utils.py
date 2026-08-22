@@ -70,7 +70,7 @@ def get_attention_check_expected(profile_order, profile_id, phase):
     return expected_response if is_valid_likert(expected_response) else None
 
 
-def has_reflection_message(ai_conversation, minimum_length=30):
+def has_reflection_message(ai_conversation, minimum_length=1):
     """Require one participant chat response beyond the initial justification."""
     if isinstance(ai_conversation, str):
         try:

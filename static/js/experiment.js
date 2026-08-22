@@ -129,6 +129,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return true;
             }
             if (data.study_stage === 'post_evaluation') {
+                STATE.hasSentReflectionMessage = Boolean(data.has_reflection_message);
                 initUI();
                 loadTrial(data.initial_evaluation);
                 return true;
@@ -194,9 +195,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             ? `Write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters, then discuss your reasoning with the AI assistant before completing your final evaluation.`
             : `Write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters before completing your final evaluation.`;
 
-        if (!isAiAssisted) {
-            finalInstruction.innerText = 'After completing your justification, please confirm or, if appropriate, revise your final evaluations for this candidate.';
-        }
         finalInstruction.classList.add('d-none');
     }
 
@@ -357,7 +355,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         STATE.initialSubmissionId = savedInitialEvaluation ? null : createSubmissionId();
         STATE.finalSubmissionId = null;
         STATE.aiChatHistory = [];
-        STATE.hasSentReflectionMessage = false;
+        STATE.hasSentReflectionMessage = savedInitialEvaluation ? STATE.hasSentReflectionMessage : false;
         STATE.hasReturnedToEvaluation = false;
         STATE.isChatActive = false;
         document.getElementById('justification_text').value = '';
@@ -463,28 +461,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const justificationText = document.getElementById('justification_text').value.trim();
         const submitButton = document.getElementById('btnSubmitFinalEvaluation');
+        const returnButton = document.getElementById('btnReviewEvaluation');
         const finalInstruction = document.getElementById('finalEvaluationInstruction');
         const prerequisitesMet = justificationText.length >= MIN_JUSTIFICATION_LENGTH
             && (!isAiAssistedCondition() || STATE.hasSentReflectionMessage);
-        document.getElementById('postEvaluationActions').classList.toggle('d-none', !prerequisitesMet);
+        document.getElementById('postEvaluationActions').classList.remove('d-none');
         submitButton.disabled = false;
-
-        if (!prerequisitesMet) {
-            STATE.hasReturnedToEvaluation = false;
-        }
+        returnButton.classList.toggle('d-none', !prerequisitesMet || STATE.hasReturnedToEvaluation);
 
         if (isAiAssistedCondition()) {
-            finalInstruction.innerHTML = STATE.hasSentReflectionMessage
-                ? '<strong>Next, select Return to Evaluation.</strong> Then confirm or, if appropriate, revise your final evaluations for this candidate before submitting.'
-                : `To continue, write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters and send at least one message to the AI assistant.`;
+            finalInstruction.innerHTML = `To continue, write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters and send a response to the AI assistant. Then select <strong>Return to Evaluation</strong> to confirm or, if appropriate, revise your final evaluations before submitting.`;
         } else {
-            finalInstruction.innerHTML = '<strong>Next, select Return to Evaluation.</strong> Then confirm or, if appropriate, revise your final evaluations for this candidate before submitting.';
+            finalInstruction.innerHTML = `To continue, write a justification of at least ${MIN_JUSTIFICATION_LENGTH} characters. Then select <strong>Return to Evaluation</strong> to confirm or, if appropriate, revise your final evaluations before submitting.`;
         }
-        finalInstruction.classList.toggle('d-none', !prerequisitesMet);
+        finalInstruction.classList.toggle('d-none', STATE.hasReturnedToEvaluation);
     }
 
     function returnToEvaluation() {
         STATE.hasReturnedToEvaluation = true;
+        updatePostEvaluationActions();
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -528,14 +523,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // --- PHASE 2: POST-PERFORMANCE EVALUATION & JUSTIFICATION ---
         if (STATE.evaluationPhase === 'post') {
-            if (!STATE.hasReturnedToEvaluation) {
-                alert('Please select Return to Evaluation before submitting. Review and, if appropriate, revise your ratings first.');
-                return;
-            }
-
-            const evaluationData = collectEvaluationData();
-            if (!evaluationData) return; // Validation failed
-    
             const justificationText = document.getElementById('justification_text').value.trim();
             if (justificationText.length < MIN_JUSTIFICATION_LENGTH) {
                 alert(`Please write at least ${MIN_JUSTIFICATION_LENGTH} characters explaining which evidence informed your ratings before continuing.`);
@@ -546,6 +533,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 openChatPanel();
                 return;
             }
+            if (!STATE.hasReturnedToEvaluation) {
+                alert('Please select Return to Evaluation before submitting. Review and, if appropriate, revise your ratings first.');
+                return;
+            }
+
+            const evaluationData = collectEvaluationData();
+            if (!evaluationData) return; // Validation failed
 
             STATE.postEvaluationData = evaluationData;
             await saveAllData();
@@ -647,11 +641,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             STATE.aiChatHistory = data.conversation;
             STATE.hasSentReflectionMessage = true;
             displayChatMessages();
-            const finalInstruction = document.getElementById('finalEvaluationInstruction');
-            finalInstruction.innerHTML = '<strong>Thank you for reflecting.</strong> Taking the discussion into account, please now <strong>confirm or, if appropriate, revise your final evaluations</strong> for this candidate.';
-            finalInstruction.classList.remove('d-none');
             updatePostEvaluationActions();
-            finalInstruction.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            document.getElementById('finalEvaluationInstruction').scrollIntoView({ behavior: 'smooth', block: 'center' });
         } catch (error) {
             console.error(error);
         } finally {

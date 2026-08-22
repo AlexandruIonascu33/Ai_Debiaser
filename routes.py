@@ -266,6 +266,12 @@ def init_session():
                 participant_id=participant.id, profile_id=profile_id
             ).one()
             response_data['initial_evaluation'] = serialize_initial_evaluation(initial_evaluation)
+            conversation = AIConversation.query.filter_by(
+                participant_id=participant.id, profile_id=profile_id
+            ).first()
+            response_data['has_reflection_message'] = has_reflection_message(
+                conversation.messages if conversation else None
+            )
         return jsonify(response_data), 201
     except Exception:
         return api_server_error('Unable to initialize participant session')
