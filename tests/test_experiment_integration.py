@@ -110,19 +110,21 @@ class ExperimentIntegrationTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(Participant.query.count(), 0)
 
-    def test_new_participants_are_assigned_to_the_ai_condition(self):
+    def test_new_participants_receive_and_persist_a_random_condition(self):
         assigned_conditions = {}
-        for index in range(1, 3):
+        for index, expected_condition in enumerate(('ai_assisted', 'control'), start=1):
             client = self.app.test_client()
             prolific_pid = f'participant-{index}'
             client.get(f'/?PROLIFIC_PID={prolific_pid}&STUDY_ID=study-1&SESSION_ID=session-{index}')
-            response = client.post('/api/init_session', json={
-                'consent_accepted': True,
-                'profile_order': PROFILE_ORDER,
-            })
+            with patch('routes.secrets.choice', return_value=expected_condition) as choose_condition:
+                response = client.post('/api/init_session', json={
+                    'consent_accepted': True,
+                    'profile_order': PROFILE_ORDER,
+                })
             self.assertEqual(response.status_code, 201, response.get_json())
-            self.assertEqual(response.get_json()['experimental_condition'], 'ai_assisted')
-            assigned_conditions[prolific_pid] = 'ai_assisted'
+            self.assertEqual(response.get_json()['experimental_condition'], expected_condition)
+            choose_condition.assert_called_once_with(('ai_assisted', 'control'))
+            assigned_conditions[prolific_pid] = expected_condition
 
         with self.app.app_context():
             saved_conditions = {
