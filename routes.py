@@ -4,7 +4,6 @@ import io
 import json
 import logging
 import os
-import secrets
 from datetime import datetime, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, redirect, render_template, request, session
@@ -34,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 AI_ASSISTED_CONDITION = 'ai_assisted'
 CONTROL_CONDITION = 'control'
-EXPERIMENTAL_CONDITIONS = (AI_ASSISTED_CONDITION, CONTROL_CONDITION)
 MAX_TEXT_LENGTH = 10_000
 MAX_AI_CONTEXT_LENGTH = 4_000
 MAX_AI_JUSTIFICATION_LENGTH = 3_000
@@ -244,7 +242,7 @@ def init_session():
                 consent_given=True,
                 consent_at=datetime.now(timezone.utc),
                 study_version=os.environ.get('STUDY_VERSION', '1.0.0').strip()[:32] or '1.0.0',
-                experimental_condition=secrets.choice(EXPERIMENTAL_CONDITIONS),
+                experimental_condition=AI_ASSISTED_CONDITION,
                 profile_order=profile_order,
                 status='started'
             )
