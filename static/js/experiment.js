@@ -130,6 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             if (data.study_stage === 'post_evaluation') {
                 STATE.hasSentReflectionMessage = Boolean(data.has_reflection_message);
+                STATE.aiChatHistory = Array.isArray(data.ai_conversation) ? data.ai_conversation : [];
                 initUI();
                 loadTrial(data.initial_evaluation);
                 return true;
@@ -354,7 +355,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         STATE.postEvaluationData = null;
         STATE.initialSubmissionId = savedInitialEvaluation ? null : createSubmissionId();
         STATE.finalSubmissionId = null;
-        STATE.aiChatHistory = [];
+        STATE.aiChatHistory = savedInitialEvaluation ? STATE.aiChatHistory : [];
         STATE.hasSentReflectionMessage = savedInitialEvaluation ? STATE.hasSentReflectionMessage : false;
         STATE.hasReturnedToEvaluation = false;
         STATE.isChatActive = false;
@@ -550,6 +551,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 7. AI CHAT LOGIC
     // ==========================================
 
+    async function restoreActiveParticipantSession() {
+        const originalParticipantId = STATE.participantId;
+        const response = await fetch('/api/init_session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                consent_accepted: true,
+                profile_order: STATE.stimuliList.map(profile => profile.id),
+                resume_only: true
+            })
+        });
+        const data = await response.json();
+        if (!response.ok || data.participant_id !== originalParticipantId || data.study_stage !== 'post_evaluation') {
+            return false;
+        }
+
+        STATE.participantId = data.participant_id;
+        STATE.experimentalCondition = data.experimental_condition;
+        STATE.currentTrial = data.current_trial_index;
+        STATE.hasSentReflectionMessage = Boolean(data.has_reflection_message);
+        STATE.aiChatHistory = Array.isArray(data.ai_conversation) ? data.ai_conversation : [];
+        return true;
+    }
+
+    async function requestAiChat(payload) {
+        let response = await fetch('/api/ai_chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        let data = await response.json();
+
+        if (response.status === 401 && await restoreActiveParticipantSession()) {
+            payload.participant_id = STATE.participantId;
+            payload.profile_id = STATE.stimuliList[STATE.currentTrial].id;
+            payload.evaluation_context = getAiEvaluationContext();
+            response = await fetch('/api/ai_chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            data = await response.json();
+        }
+
+        return { response, data };
+    }
+
     async function openChatPanel() {
         if (!isAiAssistedCondition()) {
             return;
@@ -572,17 +620,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('chatMessages').innerHTML = '<p class="text-muted small">The assistant is reviewing your justification...</p>';
 
         try {
-            const response = await fetch('/api/ai_chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    participant_id: STATE.participantId,
-                    profile_id: STATE.stimuliList[STATE.currentTrial].id,
-                    justification,
-                    evaluation_context: getAiEvaluationContext()
-                })
+            const { response, data } = await requestAiChat({
+                participant_id: STATE.participantId,
+                profile_id: STATE.stimuliList[STATE.currentTrial].id,
+                justification,
+                evaluation_context: getAiEvaluationContext()
             });
-            const data = await response.json();
 
             if (!response.ok) throw new Error(data.message || 'Error communicating with the AI.');
 
@@ -625,17 +668,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         input.disabled = true;
 
         try {
-            const response = await fetch('/api/ai_chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    participant_id: STATE.participantId,
-                    profile_id: STATE.stimuliList[STATE.currentTrial].id,
-                    evaluation_context: getAiEvaluationContext(),
-                    message
-                })
+            const { response, data } = await requestAiChat({
+                participant_id: STATE.participantId,
+                profile_id: STATE.stimuliList[STATE.currentTrial].id,
+                evaluation_context: getAiEvaluationContext(),
+                message
             });
-            const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Error communicating with the AI.');
 
             STATE.aiChatHistory = data.conversation;

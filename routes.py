@@ -206,6 +206,7 @@ def init_session():
         profile_order = data.get('profile_order')
         if not has_valid_profile_order(profile_order):
             return jsonify({'status': 'error', 'message': 'The study order must contain each candidate exactly once.'}), 400
+        resume_only = data.get('resume_only') is True
 
         recruitment_metadata = session.get('recruitment_metadata', {})
         recruitment_source = session.get('recruitment_source', 'direct')
@@ -232,6 +233,8 @@ def init_session():
                 participant.prolific_session_id = recruitment_metadata.get('prolific_session_id') or participant.prolific_session_id
             participant.status = 'started'
             participant.resume_count += 1
+        elif resume_only:
+            return jsonify({'status': 'error', 'message': 'The previous study session could not be restored.'}), 401
         else:
             participant = Participant(
                 recruitment_source=recruitment_source,
@@ -269,6 +272,7 @@ def init_session():
             conversation = AIConversation.query.filter_by(
                 participant_id=participant.id, profile_id=profile_id
             ).first()
+            response_data['ai_conversation'] = conversation.messages if conversation else []
             response_data['has_reflection_message'] = has_reflection_message(
                 conversation.messages if conversation else None
             )

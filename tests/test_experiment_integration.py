@@ -244,6 +244,39 @@ class ExperimentIntegrationTests(unittest.TestCase):
         self.assertEqual(resumed_response.get_json()['study_stage'], 'post_evaluation')
         self.assertTrue(resumed_response.get_json()['has_reflection_message'])
 
+    def test_prolific_ai_session_can_be_restored_before_sending_a_message(self):
+        session_data = self.start_prolific_session()
+        with self.app.app_context():
+            participant = db.session.get(Participant, session_data['participant_id'])
+            participant.experimental_condition = 'ai_assisted'
+            db.session.commit()
+        initial_response = self.client.post('/api/save_initial_evaluation', json=self.valid_initial_payload(
+            session_data['participant_id'], 'it_2', 1
+        ))
+        self.assertEqual(initial_response.status_code, 201, initial_response.get_json())
+
+        returning_client = self.app.test_client()
+        returning_client.get('/?PROLIFIC_PID=participant-1&STUDY_ID=study-1&SESSION_ID=session-return')
+        resume_response = returning_client.post('/api/init_session', json={
+            'consent_accepted': True,
+            'profile_order': PROFILE_ORDER,
+            'resume_only': True,
+        })
+        self.assertEqual(resume_response.status_code, 201, resume_response.get_json())
+        self.assertEqual(resume_response.get_json()['participant_id'], session_data['participant_id'])
+        self.assertEqual(resume_response.get_json()['study_stage'], 'post_evaluation')
+
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}, clear=False), patch(
+            'routes.request_ai_reflection', return_value='Consider the performance evidence for each rating.'
+        ):
+            chat_response = returning_client.post('/api/ai_chat', json={
+                'participant_id': session_data['participant_id'],
+                'profile_id': 'it_2',
+                'justification': 'The available performance evidence supports my initial evaluation.',
+                'evaluation_context': {'profile_id': 'it_2'},
+            })
+        self.assertEqual(chat_response.status_code, 200, chat_response.get_json())
+
     def test_refresh_resumes_the_active_direct_participant_session(self):
         self.client.get('/')
         session_data = self.client.post('/api/init_session', json={
